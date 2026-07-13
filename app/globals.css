@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+/* HAEMIQ brand tokens — defining these here makes them usable as
+   Tailwind classes everywhere, e.g. bg-paper, text-ink, text-blood,
+   font-serif (Fraunces), font-sans (Manrope). */
+@theme {
+  --color-ink: #0a0a0a;
+  --color-paper: #f4ede1;
+  --color-blood: #c73e1d;
+  --color-grey: #6b645a;
+
+  --font-serif: var(--font-fraunces);
+  --font-sans: var(--font-manrope);
+}
+
+body {
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+}
