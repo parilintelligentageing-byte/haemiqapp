@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { CinematicSplit } from "@/components/marketing/cinematic-split";
 
 export default async function Home() {
   const supabase = await createClient();
@@ -13,27 +14,26 @@ export default async function Home() {
   }
 
   return (
-    <main className="flex flex-1 flex-col items-center justify-center bg-paper px-6 text-center">
-      <h1 className="font-serif italic text-5xl text-ink sm:text-6xl">
-        Haemiq · Setup Complete
-      </h1>
-      <p className="mt-4 font-sans text-lg text-grey">
-        The foundation is ready. Insights and meal plans come next.
-      </p>
-      <div className="mt-8 flex items-center gap-4">
-        <Link
-          href="/login"
-          className="font-sans text-sm text-ink underline underline-offset-2"
-        >
-          Sign In
-        </Link>
-        <Link
-          href="/signup"
-          className="bg-blood px-5 py-2 font-sans text-sm font-medium text-paper transition-opacity hover:opacity-90"
-        >
-          Get Started
-        </Link>
+    <CinematicSplit>
+      <div className="flex flex-col items-center gap-8 text-center">
+        <p className="font-serif text-lg italic text-text-soft">
+          Read your body&apos;s signal.
+        </p>
+        <div className="flex w-full flex-col gap-4">
+          <Link
+            href="/signup"
+            className="w-full rounded-full bg-teal px-4 py-3 text-center font-sans text-sm font-semibold tracking-wide text-paper uppercase transition-colors hover:bg-ink"
+          >
+            Get Started
+          </Link>
+          <Link
+            href="/login"
+            className="w-full rounded-full border border-teal px-4 py-3 text-center font-sans text-sm font-semibold tracking-wide text-teal uppercase transition-colors hover:bg-teal hover:text-paper"
+          >
+            Sign In
+          </Link>
+        </div>
       </div>
-    </main>
+    </CinematicSplit>
   );
 }

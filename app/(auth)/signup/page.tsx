@@ -10,29 +10,27 @@ export default async function SignupPage({
 
   return (
     <div>
-      <div className="mb-10 text-center">
-        <span
-          aria-hidden
-          className="mb-4 inline-block h-2 w-2 rounded-full bg-blood"
-        />
-        <h1 className="font-serif italic text-4xl text-ink">Get started</h1>
-        <p className="mt-2 font-sans text-sm text-grey">
+      <div className="mb-10">
+        <h1 className="font-serif text-[32px] italic text-ink">
+          Start your journey
+        </h1>
+        <p className="mt-2 font-serif italic text-text-soft">
           Create your Haemiq account.
         </p>
       </div>
 
       {message === "check-email" ? (
-        <p className="text-center font-sans text-sm text-ink">
+        <p className="font-sans text-sm text-ink">
           Check your inbox — we&apos;ve sent a confirmation link to finish
           setting up your account.
         </p>
       ) : (
         <>
-          <form action={signup} className="space-y-4">
+          <form action={signup} className="space-y-6">
             <div>
               <label
                 htmlFor="email"
-                className="block font-sans text-sm text-ink"
+                className="block font-sans text-[11px] tracking-widest text-text-soft uppercase"
               >
                 Email
               </label>
@@ -42,14 +40,14 @@ export default async function SignupPage({
                 type="email"
                 required
                 autoComplete="email"
-                className="mt-1 w-full border border-ink/20 bg-paper px-3 py-2 font-sans text-ink focus:border-ink focus:outline-none"
+                className="mt-2 w-full border-0 border-b border-line bg-transparent py-1.5 font-sans text-ink focus:border-teal focus:outline-none"
               />
             </div>
 
             <div>
               <label
                 htmlFor="password"
-                className="block font-sans text-sm text-ink"
+                className="block font-sans text-[11px] tracking-widest text-text-soft uppercase"
               >
                 Password
               </label>
@@ -60,28 +58,23 @@ export default async function SignupPage({
                 required
                 minLength={6}
                 autoComplete="new-password"
-                className="mt-1 w-full border border-ink/20 bg-paper px-3 py-2 font-sans text-ink focus:border-ink focus:outline-none"
+                className="mt-2 w-full border-0 border-b border-line bg-transparent py-1.5 font-sans text-ink focus:border-teal focus:outline-none"
               />
             </div>
 
-            {error && (
-              <p className="font-sans text-sm text-blood">{error}</p>
-            )}
+            {error && <p className="font-sans text-sm text-alert">{error}</p>}
 
             <button
               type="submit"
-              className="w-full bg-blood px-4 py-2 font-sans text-sm font-medium text-paper transition-opacity hover:opacity-90"
+              className="w-full rounded-full bg-teal px-4 py-3 font-sans text-sm font-semibold tracking-wide text-paper uppercase transition-colors hover:bg-ink"
             >
               Get Started
             </button>
           </form>
 
-          <p className="mt-6 text-center font-sans text-sm text-grey">
+          <p className="mt-8 text-center font-sans text-sm text-text-soft">
             Already have an account?{" "}
-            <Link
-              href="/login"
-              className="text-ink underline underline-offset-2"
-            >
+            <Link href="/login" className="text-gold hover:underline">
               Sign in
             </Link>
           </p>
