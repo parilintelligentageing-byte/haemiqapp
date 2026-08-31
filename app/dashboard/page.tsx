@@ -10,8 +10,14 @@ import { Greeting } from "@/components/dashboard/greeting";
 import { VitalitySection } from "@/components/vitality/vitality-section";
 import { VitalityHeroSkeleton } from "@/components/vitality/vitality-hero";
 import { ComingSoon } from "@/components/vitality/coming-soon";
+import { RecoverySection, RecoverySectionSkeleton } from "@/components/wearables/recovery-section";
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ oura_error?: string }>;
+}) {
+  const { oura_error } = await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
@@ -43,6 +49,10 @@ export default async function DashboardPage() {
       </Suspense>
 
       <ComingSoon />
+
+      <Suspense fallback={<RecoverySectionSkeleton />}>
+        <RecoverySection ouraError={oura_error === "1"} />
+      </Suspense>
 
       <section
         id="blood-reports"

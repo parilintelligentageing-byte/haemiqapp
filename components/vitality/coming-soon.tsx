@@ -4,7 +4,6 @@ interface ComingSoonCard {
 }
 
 const CARDS: ComingSoonCard[] = [
-  { title: "Wearable data", description: "Apple Watch, Fitbit, Whoop — all in one place." },
   { title: "Today's meal plan", description: "AI meals that respond to your biomarkers." },
   {
     title: "Transformation timeline",
