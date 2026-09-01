@@ -3,9 +3,11 @@ import Link from "next/link";
 export function TopNav({
   name,
   showSuggestedTestsLink = false,
+  showMealPlanLink = false,
 }: {
   name: string;
   showSuggestedTestsLink?: boolean;
+  showMealPlanLink?: boolean;
 }) {
   const initial = name.trim().charAt(0).toUpperCase() || "?";
 
@@ -27,20 +29,36 @@ export function TopNav({
         </div>
       </div>
 
-      {showSuggestedTestsLink && (
-        <div className="flex justify-end">
-          <Link
-            href="/suggested-tests"
-            className="group flex items-center gap-1.5 rounded-full border border-line bg-surface px-[18px] py-2.5 font-serif text-sm text-ink italic transition-colors hover:border-teal hover:bg-white/[0.03]"
-          >
-            Suggested Tests
-            <span
-              aria-hidden="true"
-              className="text-gold transition-transform duration-200 group-hover:translate-x-1"
+      {(showSuggestedTestsLink || showMealPlanLink) && (
+        <div className="flex justify-end gap-3">
+          {showMealPlanLink && (
+            <Link
+              href="/meal-plan"
+              className="group flex items-center gap-1.5 rounded-full border border-line bg-surface px-[18px] py-2.5 font-serif text-sm text-ink italic transition-colors hover:border-teal hover:bg-white/[0.03]"
             >
-              →
-            </span>
-          </Link>
+              Meal Plan
+              <span
+                aria-hidden="true"
+                className="text-gold transition-transform duration-200 group-hover:translate-x-1"
+              >
+                →
+              </span>
+            </Link>
+          )}
+          {showSuggestedTestsLink && (
+            <Link
+              href="/suggested-tests"
+              className="group flex items-center gap-1.5 rounded-full border border-line bg-surface px-[18px] py-2.5 font-serif text-sm text-ink italic transition-colors hover:border-teal hover:bg-white/[0.03]"
+            >
+              Suggested Tests
+              <span
+                aria-hidden="true"
+                className="text-gold transition-transform duration-200 group-hover:translate-x-1"
+              >
+                →
+              </span>
+            </Link>
+          )}
         </div>
       )}
     </nav>

@@ -41,7 +41,7 @@ export default async function DashboardPage({
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-6 pb-24">
-      <TopNav name={profile.name} showSuggestedTestsLink />
+      <TopNav name={profile.name} showSuggestedTestsLink showMealPlanLink />
       <Greeting name={profile.name} />
 
       <Suspense fallback={<VitalityHeroSkeleton />}>

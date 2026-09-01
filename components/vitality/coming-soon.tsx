@@ -4,7 +4,6 @@ interface ComingSoonCard {
 }
 
 const CARDS: ComingSoonCard[] = [
-  { title: "Today's meal plan", description: "AI meals that respond to your biomarkers." },
   {
     title: "Transformation timeline",
     description: "Available after your second blood report.",

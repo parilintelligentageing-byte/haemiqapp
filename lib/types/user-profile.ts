@@ -12,6 +12,7 @@ export interface UserProfile {
   dietary_preferences: string[] | null;
   activity_level: string | null;
   health_conditions: string[] | null;
+  allergies: string[] | null;
   created_at: string;
   updated_at: string;
 }
