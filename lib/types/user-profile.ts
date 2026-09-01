@@ -11,6 +11,7 @@ export interface UserProfile {
   fitness_goals: string[] | null;
   dietary_preferences: string[] | null;
   activity_level: string | null;
+  goal_intensity: string | null;
   health_conditions: string[] | null;
   allergies: string[] | null;
   created_at: string;

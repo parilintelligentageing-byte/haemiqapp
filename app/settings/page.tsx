@@ -16,7 +16,7 @@ export default async function SettingsPage() {
 
   const { data: profile } = await supabase
     .from("user_profiles")
-    .select("name, dietary_preferences, allergies, fitness_goals")
+    .select("name, dietary_preferences, allergies, fitness_goals, activity_level, goal_intensity")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -43,6 +43,8 @@ export default async function SettingsPage() {
           initialDietaryPreferences={profile?.dietary_preferences ?? []}
           initialAllergies={profile?.allergies ?? []}
           initialPrimaryGoal={profile?.fitness_goals?.[0] ?? null}
+          initialActivityLevel={profile?.activity_level ?? null}
+          initialGoalIntensity={profile?.goal_intensity ?? null}
           title="Meal plan preferences"
           description="Changes apply the next time you generate or regenerate your meal plan."
           submitLabel="Save changes"

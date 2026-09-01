@@ -4,7 +4,10 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { anthropic } from "@/lib/anthropic/client";
 import { getLatestCompletedBiomarkers } from "@/lib/actions/blood-reports";
+import { getCalorieTargetData, type CalorieTargetResult } from "@/lib/actions/calorie-target";
 import { needsPreferencesGate } from "@/lib/meal-plan/preference-options";
+import { classifyScalability, clampToRealisticPortions, scaleFoodsToTargets } from "@/lib/nutrition/food-scaling";
+import { normalizeSearchKey } from "@/lib/usda/search-key";
 import {
   buildMatchFromDetail,
   searchFood,
@@ -121,6 +124,43 @@ const SWAP_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+// Last-resort top-up: only called when realistic per-food portion caps
+// (see lib/nutrition/food-scaling.ts) leave a meal short of the calorie
+// and/or protein target even after scaling everything else as far as it
+// realistically can go. Proposes exactly one more food rather than
+// pushing an existing ingredient into an unrealistic single-sitting
+// amount.
+function buildGapFillSystemPrompt(mealType: MealType, gapDescription: string): string {
+  return `You are a nutrition-minded assistant helping a user add ONE more food to their existing ${mealType}, because realistic portion sizes on the foods already there leave this meal short of the day's target: ${gapDescription}
+
+You must propose WHICH food makes sense — never nutrition numbers. Do not output calories, grams, macros, or any quantity. A separate, real food-database lookup supplies all numeric nutrition data after you respond. Your schema has no fields for numbers because you must never invent them.
+
+The user message includes a "HARD CONSTRAINTS" section (diet and allergies), a "PERSISTENT FOOD PREFERENCES" section, a "GUIDANCE" section, and a list of foods already in ${mealType}. These are not the same kind of instruction:
+
+- HARD CONSTRAINTS are absolute and safety-critical, especially allergies. Before proposing the food, check it against every listed allergen — including obvious derivatives and hidden forms. The diet constraint is equally strict: never propose a food outside the user's stated diet.
+- PERSISTENT FOOD PREFERENCES: any food listed as permanently excluded must be treated as strictly as an allergy — never propose it or an obvious variant of it.
+- GUIDANCE should shape your choice but never override a hard constraint or a permanent exclusion.
+- Do not propose a food already listed in ${mealType}.
+
+Propose exactly ONE food that would realistically belong alongside what's already in this meal (e.g. a side, not a random unrelated item) and would help close the gap described above:
+- food_name: a generic, commonly-searchable food name — not a brand or a prepared dish.
+- category: one of protein, carb, vegetable, fruit, dairy, other.
+- preparation: "raw" or "cooked" if it meaningfully affects the food, or null if it doesn't apply.
+- rationale: one plain-English sentence explaining why this food fits.`;
+}
+
+const GAP_FILL_SCHEMA = {
+  type: "object",
+  properties: {
+    food_name: { type: "string" },
+    category: { type: "string", enum: MEAL_PLAN_FOOD_CATEGORIES },
+    preparation: { anyOf: [{ type: "string", enum: ["raw", "cooked"] }, { type: "null" }] },
+    rationale: { type: "string" },
+  },
+  required: ["food_name", "category", "preparation", "rationale"],
+  additionalProperties: false,
+} as const;
+
 export interface MealPlanContext {
   hasBiomarkers: boolean;
   outOfRangeBiomarkers: Array<{
@@ -145,6 +185,7 @@ export interface MealPlanContext {
     dietaryPreferences: string[];
     fitnessGoals: string[];
     activityLevel: string | null;
+    goalIntensity: string | null;
     healthConditions: string[];
     allergies: string[];
   };
@@ -152,6 +193,7 @@ export interface MealPlanContext {
     excluded: string[];
     preferred: string[];
   };
+  calorieTarget: CalorieTargetResult | null;
 }
 
 function average(values: number[]): number | null {
@@ -177,10 +219,12 @@ export async function getMealPlanContext(): Promise<MealPlanContext> {
         dietaryPreferences: [],
         fitnessGoals: [],
         activityLevel: null,
+        goalIntensity: null,
         healthConditions: [],
         allergies: [],
       },
       foodPreferences: { excluded: [], preferred: [] },
+      calorieTarget: null,
     };
   }
 
@@ -210,16 +254,15 @@ export async function getMealPlanContext(): Promise<MealPlanContext> {
         }
       : null;
 
-  const { data: profile } = await supabase
-    .from("user_profiles")
-    .select("name, dietary_preferences, fitness_goals, activity_level, health_conditions, allergies")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  const { data: preferenceRows } = await supabase
-    .from("food_preferences")
-    .select("food_name, preference")
-    .eq("user_id", user.id);
+  const [{ data: profile }, { data: preferenceRows }, calorieTarget] = await Promise.all([
+    supabase
+      .from("user_profiles")
+      .select("name, dietary_preferences, fitness_goals, activity_level, goal_intensity, health_conditions, allergies")
+      .eq("id", user.id)
+      .maybeSingle(),
+    supabase.from("food_preferences").select("food_name, preference").eq("user_id", user.id),
+    getCalorieTargetData(),
+  ]);
 
   const foodPreferences = {
     excluded: (preferenceRows ?? []).filter((r) => r.preference === "excluded").map((r) => r.food_name),
@@ -244,10 +287,12 @@ export async function getMealPlanContext(): Promise<MealPlanContext> {
       dietaryPreferences: profile?.dietary_preferences ?? [],
       fitnessGoals: profile?.fitness_goals ?? [],
       activityLevel: profile?.activity_level ?? null,
+      goalIntensity: profile?.goal_intensity ?? null,
       healthConditions: profile?.health_conditions ?? [],
       allergies: profile?.allergies ?? [],
     },
     foodPreferences,
+    calorieTarget,
   };
 }
 
@@ -307,6 +352,13 @@ function buildContextBlock(context: MealPlanContext): string {
     `Fitness goals: ${p.fitnessGoals.length > 0 ? p.fitnessGoals.join(", ") : "not yet provided"}.`
   );
   lines.push(`Activity level: ${p.activityLevel ?? "not yet provided"}.`);
+  if (context.calorieTarget) {
+    const t = context.calorieTarget;
+    lines.push(
+      `Daily calorie target: ~${t.targetCalories} kcal${t.goalLabel ? ` (${t.goalLabel})` : ""} — favor appropriately-sized, realistic portions; avoid choices whose typical serving would blow well past this budget.`,
+      `Daily protein target: ~${t.proteinTargetG}g — favor protein-forward selections (legumes, tofu, tempeh, dairy, or lean meats consistent with the diet) across meals, so there's enough protein-category food for realistic portions to reach this.`
+    );
+  }
   lines.push(
     `Health conditions: ${p.healthConditions.length > 0 ? p.healthConditions.join(", ") : "none provided"}.`
   );
@@ -364,10 +416,6 @@ function matchedInList(foodName: string, terms: string[]): string | null {
       return normalizedFood.includes(normalized) || normalizedFood.includes(singularize(normalized));
     }) ?? null
   );
-}
-
-function normalizeSearchKey(foodName: string, preparation: MealPlanFoodPreparation): string {
-  return `${foodName.trim().toLowerCase()}::${preparation}`;
 }
 
 async function lookupWithCache(
@@ -441,21 +489,48 @@ interface ResolvableFood extends ProposedFoodBase {
 // food against the USDA cache/API, then inserts the resulting rows into
 // meal_plan_foods. Throws on a DB insert failure so callers can surface
 // their own user-facing error message.
+interface ResolvedFoodRow {
+  food_name: string;
+  usda_fdc_id: string;
+  quantityGrams: number;
+  preparation: MealPlanFoodPreparation;
+  calories: number | null;
+  proteinG: number | null;
+  carbsG: number | null;
+  fatG: number | null;
+  category: MealPlanFoodCategory;
+  meal_type: MealType;
+  rationale: string;
+}
+
+export interface ResolveAndInsertTargets {
+  calories: number;
+  proteinG: number;
+}
+
+interface ResolveAndInsertResult {
+  skippedFoods: string[];
+  calorieGapKcal: number;
+  proteinGapG: number;
+  mealTypeTotals: Partial<Record<MealType, number>>;
+}
+
 async function resolveAndInsertFoods(
   supabase: SupabaseServerClient,
   userId: string,
   mealPlanId: string,
   foods: ResolvableFood[],
-  logLabel: string
-): Promise<{ skippedFoods: string[] }> {
-  if (foods.length === 0) return { skippedFoods: [] };
+  logLabel: string,
+  targets: ResolveAndInsertTargets | null = null
+): Promise<ResolveAndInsertResult> {
+  if (foods.length === 0) return { skippedFoods: [], calorieGapKcal: 0, proteinGapG: 0, mealTypeTotals: {} };
 
   const preparations = foods.map((food) => food.preparation ?? defaultPreparation(food.category));
   const searchKeys = foods.map((food, i) => normalizeSearchKey(food.food_name, preparations[i]));
   const cachedMatches = await getCachedMatches(supabase, searchKeys);
 
   const skippedFoods: string[] = [];
-  const rows: Array<Record<string, unknown>> = [];
+  const resolved: ResolvedFoodRow[] = [];
   const newCacheRows = new Map<string, Record<string, unknown>>();
   let rateLimited = false;
 
@@ -488,21 +563,18 @@ async function resolveAndInsertFoods(
         continue;
       }
 
-      rows.push({
-        meal_plan_id: mealPlanId,
+      resolved.push({
         food_name: food.food_name,
         usda_fdc_id: match.fdcId,
-        quantity_grams: match.quantityGrams,
+        quantityGrams: match.quantityGrams,
         preparation,
         calories: match.calories,
-        protein_g: match.proteinG,
-        carbs_g: match.carbsG,
-        fat_g: match.fatG,
+        proteinG: match.proteinG,
+        carbsG: match.carbsG,
+        fatG: match.fatG,
         category: food.category,
         meal_type: food.meal_type,
         rationale: food.rationale,
-        status: "proposed",
-        is_user_added: false,
       });
     } catch (err) {
       if (err instanceof UsdaRateLimitError) {
@@ -525,6 +597,42 @@ async function resolveAndInsertFoods(
     }
   }
 
+  // Classify every resolved food as scalable/fixed, then — only when
+  // targets are known — scale the scalable ones (protein-first, then
+  // calories, each clamped to a realistic per-food cap) so the batch
+  // converges toward them. See lib/nutrition/food-scaling.ts.
+  const classified = resolved.map((food) => ({
+    ...food,
+    isScalable: classifyScalability({
+      foodName: food.food_name,
+      category: food.category,
+      quantityGrams: food.quantityGrams,
+      isUserAdded: false,
+    }),
+  }));
+
+  const capped = clampToRealisticPortions(classified);
+  const scaleResult = targets !== null ? scaleFoodsToTargets(capped, targets) : null;
+  const finalFoods = scaleResult?.foods ?? capped;
+
+  const rows = finalFoods.map((food) => ({
+    meal_plan_id: mealPlanId,
+    food_name: food.food_name,
+    usda_fdc_id: food.usda_fdc_id,
+    quantity_grams: food.quantityGrams,
+    preparation: food.preparation,
+    calories: food.calories,
+    protein_g: food.proteinG,
+    carbs_g: food.carbsG,
+    fat_g: food.fatG,
+    category: food.category,
+    meal_type: food.meal_type,
+    rationale: food.rationale,
+    status: "proposed",
+    is_user_added: false,
+    is_scalable: food.isScalable,
+  }));
+
   if (rows.length > 0) {
     const { error } = await supabase.from("meal_plan_foods").insert(rows);
     if (error) {
@@ -533,7 +641,96 @@ async function resolveAndInsertFoods(
     }
   }
 
-  return { skippedFoods };
+  const mealTypeTotals: Partial<Record<MealType, number>> = {};
+  for (const food of finalFoods) {
+    mealTypeTotals[food.meal_type] = (mealTypeTotals[food.meal_type] ?? 0) + (food.calories ?? 0);
+  }
+
+  return {
+    skippedFoods,
+    calorieGapKcal: scaleResult?.calorieGapKcal ?? 0,
+    proteinGapG: scaleResult?.proteinGapG ?? 0,
+    mealTypeTotals,
+  };
+}
+
+const GAP_FILL_TOLERANCE_KCAL = 125;
+const GAP_FILL_TOLERANCE_PROTEIN_G = 10;
+
+// Runs after resolveAndInsertFoods when its scaling pass (bounded by
+// realistic per-food caps) still leaves a meal short of the calorie
+// and/or protein target. Proposes and inserts exactly one more food for
+// that meal — never loops, never runs when the plan is already at or
+// over target (only an undershoot is worth topping up).
+async function attemptGapFillFood(
+  supabase: SupabaseServerClient,
+  userId: string,
+  mealPlanId: string,
+  mealType: MealType,
+  context: MealPlanContext,
+  calorieGapKcal: number,
+  proteinGapG: number
+): Promise<void> {
+  const needsCalories = calorieGapKcal > GAP_FILL_TOLERANCE_KCAL;
+  const needsProtein = proteinGapG > GAP_FILL_TOLERANCE_PROTEIN_G;
+  if (!needsCalories && !needsProtein) return;
+
+  const { data: mealFoods } = await supabase
+    .from("meal_plan_foods")
+    .select("food_name")
+    .eq("meal_plan_id", mealPlanId)
+    .eq("meal_type", mealType)
+    .neq("status", "rejected");
+
+  const existingNames = (mealFoods ?? []).map((f) => f.food_name);
+
+  const gapParts: string[] = [];
+  if (needsCalories) gapParts.push(`about ${Math.round(calorieGapKcal)} kcal short`);
+  if (needsProtein) gapParts.push(`about ${Math.round(proteinGapG)}g short on protein`);
+  const gapDescription = gapParts.join(" and ");
+
+  const contextBlock = buildContextBlock(context);
+  const existingBlock =
+    existingNames.length > 0
+      ? `Foods already in ${mealType} (do not duplicate): ${existingNames.join(", ")}.`
+      : `No foods in ${mealType} yet.`;
+
+  let food: ProposedFoodBase;
+  try {
+    const response = await anthropic.messages.create({
+      model: "claude-sonnet-5",
+      max_tokens: 1000,
+      system: buildGapFillSystemPrompt(mealType, gapDescription),
+      output_config: {
+        format: { type: "json_schema", schema: GAP_FILL_SCHEMA },
+      },
+      messages: [
+        {
+          role: "user",
+          content: `Here is what's known about this user:\n\n${contextBlock}\n\n${existingBlock}\n\nPropose one more food for ${mealType}.`,
+        },
+      ],
+    });
+
+    if (response.stop_reason === "refusal") return;
+
+    const textBlock = response.content.find((block) => block.type === "text");
+    if (!textBlock || textBlock.type !== "text") return;
+
+    food = JSON.parse(textBlock.text) as ProposedFoodBase;
+  } catch (err) {
+    console.error(`[meal-plan ${userId}] gap-fill generation failed (${mealType}):`, err);
+    return;
+  }
+
+  if (matchedInList(food.food_name, context.profile.allergies)) return;
+  if (matchedInList(food.food_name, context.foodPreferences.excluded)) return;
+
+  try {
+    await resolveAndInsertFoods(supabase, userId, mealPlanId, [{ ...food, meal_type: mealType }], `gap-fill:${mealType}`);
+  } catch (err) {
+    console.error(`[meal-plan ${userId}] gap-fill insert failed (${mealType}):`, err);
+  }
 }
 
 export interface GenerateMealPlanResult {
@@ -665,11 +862,32 @@ export async function generateMealPlan(): Promise<GenerateMealPlanResult> {
     return fail("Couldn't save your meal plan. Please try again.", excludedForAllergy, excludedForPreference);
   }
 
-  let resolved: { skippedFoods: string[] };
+  const targets: ResolveAndInsertTargets | null = context.calorieTarget
+    ? { calories: context.calorieTarget.targetCalories, proteinG: context.calorieTarget.proteinTargetG }
+    : null;
+
+  let resolved: ResolveAndInsertResult;
   try {
-    resolved = await resolveAndInsertFoods(supabase, user.id, newPlan.id, finalFoods, "generate");
+    resolved = await resolveAndInsertFoods(supabase, user.id, newPlan.id, finalFoods, "generate", targets);
   } catch {
     return fail("Couldn't save your food list. Please try again.", excludedForAllergy, excludedForPreference);
+  }
+
+  if (targets !== null) {
+    const shortestMealType = (Object.entries(resolved.mealTypeTotals) as Array<[MealType, number]>).sort(
+      (a, b) => a[1] - b[1]
+    )[0]?.[0];
+    if (shortestMealType) {
+      await attemptGapFillFood(
+        supabase,
+        user.id,
+        newPlan.id,
+        shortestMealType,
+        context,
+        resolved.calorieGapKcal,
+        resolved.proteinGapG
+      );
+    }
   }
 
   revalidatePath("/meal-plan");
@@ -719,13 +937,19 @@ export async function swapMealType(mealPlanId: string, mealType: MealType): Prom
 
   const { data: existingFoods } = await supabase
     .from("meal_plan_foods")
-    .select("food_name, meal_type, status")
+    .select("food_name, meal_type, status, calories, protein_g")
     .eq("meal_plan_id", mealPlanId)
     .neq("status", "rejected");
 
   const otherFoods = (existingFoods ?? [])
     .filter((f) => f.meal_type !== mealType)
     .map((f) => f.food_name);
+  const otherMealsCalories = (existingFoods ?? [])
+    .filter((f) => f.meal_type !== mealType)
+    .reduce((sum, f) => sum + (f.calories ?? 0), 0);
+  const otherMealsProtein = (existingFoods ?? [])
+    .filter((f) => f.meal_type !== mealType)
+    .reduce((sum, f) => sum + (f.protein_g ?? 0), 0);
   const existingBlock =
     otherFoods.length > 0
       ? `Foods already in this plan for other meals (avoid proposing duplicates): ${otherFoods.join(", ")}.`
@@ -812,11 +1036,25 @@ export async function swapMealType(mealPlanId: string, mealType: MealType): Prom
 
   const resolvableFoods: ResolvableFood[] = finalFoods.map((food) => ({ ...food, meal_type: mealType }));
 
-  let resolved: { skippedFoods: string[] };
+  // Only this meal's own foods get scaled — the rest of the day's plan is
+  // left as-is. The remaining budget is whatever the day's target has
+  // left after the other (unchanged) meals.
+  const targets: ResolveAndInsertTargets | null = context.calorieTarget
+    ? {
+        calories: Math.max(0, context.calorieTarget.targetCalories - otherMealsCalories),
+        proteinG: Math.max(0, context.calorieTarget.proteinTargetG - otherMealsProtein),
+      }
+    : null;
+
+  let resolved: ResolveAndInsertResult;
   try {
-    resolved = await resolveAndInsertFoods(supabase, user.id, mealPlanId, resolvableFoods, `swap:${mealType}`);
+    resolved = await resolveAndInsertFoods(supabase, user.id, mealPlanId, resolvableFoods, `swap:${mealType}`, targets);
   } catch {
     return failSwap("Couldn't save your replacement foods. Please try again.", excludedForAllergy, excludedForPreference);
+  }
+
+  if (targets !== null) {
+    await attemptGapFillFood(supabase, user.id, mealPlanId, mealType, context, resolved.calorieGapKcal, resolved.proteinGapG);
   }
 
   revalidatePath("/meal-plan");
@@ -933,6 +1171,7 @@ export async function addUserFood(_prevState: AddFoodState, formData: FormData):
       rationale: null,
       status: "accepted",
       is_user_added: true,
+      is_scalable: false,
     });
 
     if (error) {

@@ -56,6 +56,7 @@ export interface MealPlanFood {
   rationale: string | null;
   status: MealPlanFoodStatus;
   is_user_added: boolean;
+  is_scalable: boolean;
   created_at: string;
 }
 

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentMealPlan, getMealPlanContext } from "@/lib/actions/meal-plan";
 import { getTodaysMealLogs } from "@/lib/actions/meal-logs";
@@ -8,6 +9,7 @@ import { MealSection } from "@/components/meal-plan/meal-section";
 import { AddFoodForm } from "@/components/meal-plan/add-food-form";
 import { GeneratePlanButton } from "@/components/meal-plan/generate-plan-button";
 import { PreferencesForm } from "@/components/meal-plan/preferences-form";
+import { CalorieSummaryBar, CalorieSummaryBarSkeleton } from "@/components/meal-plan/calorie-summary-bar";
 import { needsPreferencesGate } from "@/lib/meal-plan/preference-options";
 import { MEAL_TYPE_ORDER } from "@/lib/types/meal-plan";
 
@@ -47,6 +49,12 @@ export default async function MealPlanPage() {
         </p>
       </div>
 
+      <div className="mt-10">
+        <Suspense fallback={<CalorieSummaryBarSkeleton />}>
+          <CalorieSummaryBar />
+        </Suspense>
+      </div>
+
       {!context.hasBiomarkers && !context.hasWearableData && (
         <div className="mt-8 rounded-2xl border border-line bg-surface p-6 text-center">
           <p className="font-serif text-xl text-ink italic">
@@ -65,6 +73,8 @@ export default async function MealPlanPage() {
             initialDietaryPreferences={context.profile.dietaryPreferences}
             initialAllergies={context.profile.allergies}
             initialPrimaryGoal={context.profile.fitnessGoals[0] ?? null}
+            initialActivityLevel={context.profile.activityLevel}
+            initialGoalIntensity={context.profile.goalIntensity}
             title="Before your first meal plan"
             description="A few quick questions so we never suggest something outside your diet or allergies."
             submitLabel="Save & continue"
@@ -97,7 +107,7 @@ export default async function MealPlanPage() {
             </div>
           )}
 
-          <div className="mt-10 flex flex-col gap-10">
+          <div className="mt-14 flex flex-col gap-14">
             {foodsByMealType.map(({ mealType, foods }) => (
               <MealSection
                 key={mealType}

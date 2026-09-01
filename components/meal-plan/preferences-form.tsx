@@ -3,7 +3,13 @@
 import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { saveMealPreferences, type SaveMealPreferencesState } from "@/lib/actions/meal-preferences";
-import { DIETARY_OPTIONS, GOAL_OPTIONS } from "@/lib/meal-plan/preference-options";
+import {
+  DIETARY_OPTIONS,
+  GOAL_OPTIONS,
+  ACTIVITY_LEVEL_OPTIONS,
+  GOAL_INTENSITY_OPTIONS,
+  INTENSITY_RELEVANT_GOALS,
+} from "@/lib/meal-plan/preference-options";
 
 const initialState: SaveMealPreferencesState = { error: null };
 
@@ -76,6 +82,8 @@ export function PreferencesForm({
   initialDietaryPreferences,
   initialAllergies,
   initialPrimaryGoal,
+  initialActivityLevel,
+  initialGoalIntensity,
   title,
   description,
   submitLabel,
@@ -83,6 +91,8 @@ export function PreferencesForm({
   initialDietaryPreferences: string[];
   initialAllergies: string[];
   initialPrimaryGoal: string | null;
+  initialActivityLevel?: string | null;
+  initialGoalIntensity?: string | null;
   title: string;
   description: string;
   submitLabel: string;
@@ -91,12 +101,21 @@ export function PreferencesForm({
   const [dietaryPreferences, setDietaryPreferences] = useState<string[]>(initialDietaryPreferences);
   const [allergies, setAllergies] = useState<string[]>(initialAllergies);
   const [primaryGoal, setPrimaryGoal] = useState<string | null>(initialPrimaryGoal);
+  const [activityLevel, setActivityLevel] = useState<string | null>(initialActivityLevel ?? null);
+  const [goalIntensity, setGoalIntensity] = useState<string | null>(initialGoalIntensity ?? null);
 
   const toggleDiet = (option: string) => {
     setDietaryPreferences((prev) =>
       prev.includes(option) ? prev.filter((d) => d !== option) : [...prev, option]
     );
   };
+
+  const selectGoal = (option: string) => {
+    setPrimaryGoal(option);
+    if (!INTENSITY_RELEVANT_GOALS.has(option)) setGoalIntensity(null);
+  };
+
+  const showIntensity = primaryGoal !== null && INTENSITY_RELEVANT_GOALS.has(primaryGoal);
 
   return (
     <form action={formAction} className="rounded-[20px] border border-line bg-surface p-6">
@@ -142,7 +161,7 @@ export function PreferencesForm({
               key={option}
               type="button"
               aria-pressed={primaryGoal === option}
-              onClick={() => setPrimaryGoal(option)}
+              onClick={() => selectGoal(option)}
               className={`rounded-full border px-4 py-2 font-sans text-xs transition-colors ${
                 primaryGoal === option
                   ? "border-teal bg-teal/10 text-ink"
@@ -154,6 +173,54 @@ export function PreferencesForm({
           ))}
         </div>
         <input type="hidden" name="primary_goal" value={primaryGoal ?? ""} />
+      </div>
+
+      {showIntensity && (
+        <div className="mt-5">
+          <span className="font-sans text-xs uppercase tracking-wide text-text-soft">
+            How aggressively?
+          </span>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {GOAL_INTENSITY_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                aria-pressed={goalIntensity === option.value}
+                onClick={() => setGoalIntensity(option.value)}
+                className={`rounded-full border px-4 py-2 font-sans text-xs transition-colors ${
+                  goalIntensity === option.value
+                    ? "border-teal bg-teal/10 text-ink"
+                    : "border-line text-text-soft hover:border-text-soft"
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <input type="hidden" name="goal_intensity" value={goalIntensity ?? ""} />
+        </div>
+      )}
+
+      <div className="mt-5">
+        <span className="font-sans text-xs uppercase tracking-wide text-text-soft">Activity level</span>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {ACTIVITY_LEVEL_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              aria-pressed={activityLevel === option.value}
+              onClick={() => setActivityLevel(option.value)}
+              className={`rounded-full border px-4 py-2 font-sans text-xs transition-colors ${
+                activityLevel === option.value
+                  ? "border-teal bg-teal/10 text-ink"
+                  : "border-line text-text-soft hover:border-text-soft"
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <input type="hidden" name="activity_level" value={activityLevel ?? ""} />
       </div>
 
       {state.error && (
