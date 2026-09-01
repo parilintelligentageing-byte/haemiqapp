@@ -4,6 +4,7 @@
 // calories/macros, matching how blood-report numbers are never trusted
 // from raw AI output without a grounding source.
 import type { MealPlanFoodPreparation } from "@/lib/types/meal-plan";
+import { findServingOverride } from "@/lib/usda/serving-overrides";
 
 const SEARCH_URL = "https://api.nal.usda.gov/fdc/v1/foods/search";
 const FOOD_URL = "https://api.nal.usda.gov/fdc/v1/food";
@@ -83,15 +84,57 @@ const NUTRIENT_NUMBERS = {
   carbs: "205",
 } as const;
 
+// USDA describes each result as "Head, qualifier, qualifier, ..." (e.g.
+// "Broccoli, cooked, boiled, drained, with salt"), sometimes with a
+// parenthetical alt-name fused onto the head (e.g. "Chickpeas (garbanzo
+// beans, bengal gram), mature seeds, cooked..."). Strip the parenthetical
+// before splitting on the first comma so that embedded comma doesn't get
+// mistaken for the head boundary.
+function headSegment(description: string): string {
+  const stripped = description.replace(/\([^)]*\)/g, " ").replace(/\s{2,}/g, " ").trim();
+  return stripped.split(",")[0].trim().toLowerCase();
+}
+
+// USDA's head noun is usually plural ("Apples", "Chickpeas") while an
+// AI-proposed food name is often singular ("apple") — strip a trailing
+// "s" from both sides so that difference alone doesn't break an exact
+// match.
+function stripTrailingS(s: string): string {
+  return s.endsWith("s") && s.length > 1 ? s.slice(0, -1) : s;
+}
+
+// Picking a match by preparation word alone is unsafe: a candidate can
+// contain "raw" or "cooked" purely by coincidence while being a
+// completely different food (searching "ground flaxseed raw" once
+// matched "Bison, ground, raw" — wrong species entirely — ahead of the
+// correctly-ranked "Flaxseed, ground", because flaxseed's own USDA name
+// has no raw/cooked qualifier at all). So we first narrow to candidates
+// that are actually about the requested food (by its last significant
+// word), then prefer a plain/generic entry over a named variant sharing
+// that word (e.g. "Broccoli, cooked" over "Broccoli raab, cooked"), and
+// only then use the preparation word to pick among what's left.
 function pickBestMatch(
   foods: UsdaSearchFoodItem[],
+  foodName: string,
   preparation: MealPlanFoodPreparation | null
 ): UsdaSearchFoodItem | null {
   if (foods.length === 0) return null;
-  if (!preparation) return foods[0];
 
-  const prepMatch = foods.find((food) => food.description.toLowerCase().includes(preparation));
-  return prepMatch ?? foods[0];
+  const nameNorm = foodName.trim().toLowerCase();
+  const lastWord = nameNorm.split(/\s+/).filter(Boolean).pop() ?? nameNorm;
+
+  const nameMatches = foods.filter((food) => food.description.toLowerCase().includes(lastWord));
+  const pool = nameMatches.length > 0 ? nameMatches : foods;
+
+  const exactHead = pool.filter(
+    (food) => stripTrailingS(headSegment(food.description)) === stripTrailingS(nameNorm)
+  );
+  const candidates = exactHead.length > 0 ? exactHead : pool;
+
+  if (!preparation) return candidates[0];
+
+  const prepMatch = candidates.find((food) => food.description.toLowerCase().includes(preparation));
+  return prepMatch ?? candidates[0];
 }
 
 async function searchFoods(
@@ -124,11 +167,20 @@ function extractMacrosFromDetail(detail: UsdaFoodDetail): {
 
 // Picks a realistic serving size from USDA's household-measure portions
 // (e.g. "1 breast = 174g") rather than an arbitrary 100g default, when
-// the matched food has one on record.
+// the matched food has one on record. USDA doesn't order foodPortions by
+// how "typical" a measure is, and it mixes wildly different unit scales
+// for the same food (a "1 tsp"/"1 leaf" alongside a "1 head"/"1 bag" bulk
+// entry) — taking the first or the smallest can land on either extreme
+// (a whole bulk head of broccoli, or a single spinach leaf). The median
+// of the on-file portions consistently lands closest to an actual
+// everyday serving (e.g. "1 cup") without ever picking either extreme.
 function pickCommonServingGrams(portions: UsdaFoodPortion[] | undefined): number | null {
   if (!portions || portions.length === 0) return null;
-  const withWeight = portions.find((p) => p.gramWeight && p.gramWeight > 0);
-  return withWeight ? Math.round(withWeight.gramWeight) : null;
+  const weights = portions.map((p) => p.gramWeight).filter((g): g is number => g > 0).sort((a, b) => a - b);
+  if (weights.length === 0) return null;
+  const mid = Math.floor(weights.length / 2);
+  const median = weights.length % 2 !== 0 ? weights[mid] : (weights[mid - 1] + weights[mid]) / 2;
+  return Math.round(median);
 }
 
 export interface UsdaFoodMatch {
@@ -150,10 +202,13 @@ function scale(perGram: number | null, quantityGrams: number): number | null {
 
 // Pure transform from a USDA food detail payload to our match shape —
 // shared by fresh API lookups and cached food_reference rows so a cache
-// hit computes nutrition identically to a live one.
-export function buildMatchFromDetail(fdcId: string, detail: UsdaFoodDetail): UsdaFoodMatch {
+// hit computes nutrition identically to a live one. foodName drives the
+// curated serving-size override for the narrow set of foods USDA itself
+// doesn't portion realistically — see lib/usda/serving-overrides.ts.
+export function buildMatchFromDetail(fdcId: string, detail: UsdaFoodDetail, foodName: string): UsdaFoodMatch {
   const macros = extractMacrosFromDetail(detail);
-  const quantityGrams = pickCommonServingGrams(detail.foodPortions) ?? DEFAULT_SERVING_GRAMS;
+  const quantityGrams =
+    findServingOverride(foodName)?.grams ?? pickCommonServingGrams(detail.foodPortions) ?? DEFAULT_SERVING_GRAMS;
 
   return {
     fdcId,
@@ -184,9 +239,9 @@ export async function searchFood(
   }
   if (candidates.length === 0) return null;
 
-  const best = pickBestMatch(candidates, preparation);
+  const best = pickBestMatch(candidates, foodName, preparation);
   if (!best) return null;
 
   const detail = await usdaFetch<UsdaFoodDetail>(`${FOOD_URL}/${best.fdcId}`, {});
-  return buildMatchFromDetail(String(best.fdcId), detail);
+  return buildMatchFromDetail(String(best.fdcId), detail, foodName);
 }

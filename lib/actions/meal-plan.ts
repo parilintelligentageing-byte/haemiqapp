@@ -72,11 +72,11 @@ The user message includes a "HARD CONSTRAINTS" section (diet and allergies), a "
 For each food:
 - food_name: a generic, commonly-searchable food name (e.g. "chicken breast", "rolled oats", "spinach") — not a brand or a prepared dish.
 - category: one of protein, carb, vegetable, fruit, dairy, other.
-- meal_type: one of breakfast, lunch, dinner, snack — whichever slot this food would realistically be eaten in.
+- meal_type: one of breakfast, lunch, dinner, snack — the meal this food is a component of.
 - preparation: "raw" or "cooked" if it meaningfully affects the food (e.g. chicken should be "cooked", spinach can be "raw"), or null if it doesn't apply (e.g. a fruit usually eaten as-is).
 - rationale: one plain-English sentence tied to a SPECIFIC biomarker, wearable metric, or stated goal from the GUIDANCE section — not generic health advice. If the user has no biomarker/wearable data yet, tie the rationale to their stated profile goals instead.
 
-Propose 15 to 20 foods, spanning multiple categories and all four meal types, that together form a sensible everyday food list.`;
+Group your foods into real meals, not a flat list of unrelated items: every food sharing a meal_type must read as a component of ONE dish or plate a person would actually prepare and eat together (e.g. rolled oats + chia seeds + blueberries as the components of one bowl of oatmeal) — never a grab-bag of disconnected single-ingredient snacks. Each meal_type should have roughly 2 to 4 foods, occasionally more only for a composed dish like a stir-fry or grain bowl. Propose 10 to 16 foods in total across all four meal types.`;
 
 function buildSwapSystemPrompt(mealType: MealType): string {
   return `You are a nutrition-minded assistant helping a user replace the foods in ONE meal slot (${mealType}) of their existing food list, based on their blood biomarkers, wearable recovery data, stated goals, and food preferences.
@@ -96,7 +96,7 @@ For each food:
 - preparation: "raw" or "cooked" if it meaningfully affects the food, or null if it doesn't apply.
 - rationale: one plain-English sentence tied to a SPECIFIC biomarker, wearable metric, or stated goal — not generic health advice.
 
-Propose 3 to 6 foods suitable specifically for ${mealType}.`;
+Propose 2 to 4 foods that together read as ONE realistic ${mealType} a person would actually prepare and eat — not a disconnected list of unrelated single-ingredient items.`;
 }
 
 const SWAP_SCHEMA = {
@@ -384,13 +384,13 @@ async function lookupWithCache(
     .maybeSingle();
 
   if (cached) {
-    return buildMatchFromDetail(cached.usda_fdc_id, cached.raw_json as UsdaFoodDetail);
+    return buildMatchFromDetail(cached.usda_fdc_id, cached.raw_json as UsdaFoodDetail, foodName);
   }
 
   const match = await searchFood(foodName, preparation);
   if (!match) return null;
 
-  await supabase.from("food_reference").upsert(
+  const { error: cacheError } = await supabase.from("food_reference").upsert(
     {
       search_key: searchKey,
       usda_fdc_id: match.fdcId,
@@ -399,6 +399,9 @@ async function lookupWithCache(
     },
     { onConflict: "search_key" }
   );
+  if (cacheError) {
+    console.error(`[meal-plan] food_reference cache write failed for "${searchKey}":`, cacheError.message);
+  }
 
   return match;
 }
@@ -413,14 +416,19 @@ async function getCachedMatches(
 ): Promise<Map<string, UsdaFoodMatch>> {
   if (searchKeys.length === 0) return new Map();
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("food_reference")
-    .select("search_key, usda_fdc_id, raw_json")
+    .select("search_key, usda_fdc_id, food_name, raw_json")
     .in("search_key", searchKeys);
+  if (error) {
+    console.error("[meal-plan] food_reference cache read failed:", error.message);
+  } else {
+    console.log(`[meal-plan] food_reference cache: ${data?.length ?? 0}/${searchKeys.length} hits`);
+  }
 
   const matches = new Map<string, UsdaFoodMatch>();
   for (const row of data ?? []) {
-    matches.set(row.search_key, buildMatchFromDetail(row.usda_fdc_id, row.raw_json as UsdaFoodDetail));
+    matches.set(row.search_key, buildMatchFromDetail(row.usda_fdc_id, row.raw_json as UsdaFoodDetail, row.food_name));
   }
   return matches;
 }
@@ -509,7 +517,12 @@ async function resolveAndInsertFoods(
   }
 
   if (newCacheRows.size > 0) {
-    await supabase.from("food_reference").upsert([...newCacheRows.values()], { onConflict: "search_key" });
+    const { error: cacheError } = await supabase
+      .from("food_reference")
+      .upsert([...newCacheRows.values()], { onConflict: "search_key" });
+    if (cacheError) {
+      console.error(`[meal-plan ${userId}] food_reference cache write failed (${logLabel}):`, cacheError.message);
+    }
   }
 
   if (rows.length > 0) {
