@@ -2,16 +2,13 @@
 
 import { useState, useTransition } from "react";
 import { updateFoodStatus } from "@/lib/actions/meal-plan";
-import type { MealPlanFood, MealPlanFoodCategory } from "@/lib/types/meal-plan";
+import { MEAL_PLAN_CATEGORY_LABELS } from "@/lib/types/meal-plan";
+import type { MealPlanFood } from "@/lib/types/meal-plan";
 
-const CATEGORY_LABELS: Record<MealPlanFoodCategory, string> = {
-  protein: "Protein",
-  carb: "Carb",
-  vegetable: "Vegetable",
-  fruit: "Fruit",
-  dairy: "Dairy",
-  other: "Other",
-};
+const STATUS_BUTTONS = [
+  { status: "accepted" as const, label: "Accept food", glyph: "✓", color: "var(--color-teal)" },
+  { status: "rejected" as const, label: "Reject food", glyph: "✕", color: "var(--color-alert)" },
+];
 
 function nutritionLine(food: MealPlanFood): string {
   const parts: string[] = [];
@@ -36,6 +33,7 @@ export function FoodCard({ food }: { food: MealPlanFood }) {
   const prepLabel = food.preparation ? ` (${food.preparation})` : "";
   const quantityLabel =
     food.quantity_grams !== null ? `${food.quantity_grams}g ${food.food_name}${prepLabel}` : food.food_name;
+  const nutrition = nutritionLine(food);
 
   return (
     <div
@@ -45,42 +43,30 @@ export function FoodCard({ food }: { food: MealPlanFood }) {
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="font-sans text-[10px] font-semibold tracking-[0.14em] text-gold uppercase">
-            {CATEGORY_LABELS[food.category]}
+            {MEAL_PLAN_CATEGORY_LABELS[food.category]}
           </p>
           <p className="mt-1 font-serif text-lg text-ink italic">{quantityLabel}</p>
         </div>
 
         <div className="flex shrink-0 items-center gap-1.5">
-          <button
-            type="button"
-            aria-label="Accept food"
-            aria-pressed={status === "accepted"}
-            disabled={isPending}
-            onClick={() => handleSetStatus("accepted")}
-            className="flex h-7 w-7 items-center justify-center rounded-full border text-xs transition-colors disabled:opacity-50"
-            style={
-              status === "accepted"
-                ? { borderColor: "var(--color-teal)", backgroundColor: "var(--color-teal)", color: "var(--color-paper)" }
-                : { borderColor: "var(--color-line)", color: "var(--color-text-soft)" }
-            }
-          >
-            ✓
-          </button>
-          <button
-            type="button"
-            aria-label="Reject food"
-            aria-pressed={status === "rejected"}
-            disabled={isPending}
-            onClick={() => handleSetStatus("rejected")}
-            className="flex h-7 w-7 items-center justify-center rounded-full border text-xs transition-colors disabled:opacity-50"
-            style={
-              status === "rejected"
-                ? { borderColor: "var(--color-alert)", backgroundColor: "var(--color-alert)", color: "var(--color-paper)" }
-                : { borderColor: "var(--color-line)", color: "var(--color-text-soft)" }
-            }
-          >
-            ✕
-          </button>
+          {STATUS_BUTTONS.map((button) => (
+            <button
+              key={button.status}
+              type="button"
+              aria-label={button.label}
+              aria-pressed={status === button.status}
+              disabled={isPending}
+              onClick={() => handleSetStatus(button.status)}
+              className="flex h-7 w-7 items-center justify-center rounded-full border text-xs transition-colors disabled:opacity-50"
+              style={
+                status === button.status
+                  ? { borderColor: button.color, backgroundColor: button.color, color: "var(--color-paper)" }
+                  : { borderColor: "var(--color-line)", color: "var(--color-text-soft)" }
+              }
+            >
+              {button.glyph}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -88,10 +74,8 @@ export function FoodCard({ food }: { food: MealPlanFood }) {
         <p className="mt-3 font-sans text-xs leading-relaxed text-text-soft">{food.rationale}</p>
       )}
 
-      {nutritionLine(food) && (
-        <p className="mt-3 border-t border-line pt-3 font-sans text-xs text-ink">
-          {nutritionLine(food)}
-        </p>
+      {nutrition && (
+        <p className="mt-3 border-t border-line pt-3 font-sans text-xs text-ink">{nutrition}</p>
       )}
     </div>
   );

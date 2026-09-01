@@ -15,13 +15,12 @@ export function GeneratePlanButton({ hasExistingPlan }: { hasExistingPlan: boole
     setExcludedForAllergy([]);
     startTransition(async () => {
       const result = await generateMealPlan();
+      setExcludedForAllergy(result.excludedForAllergy);
       if (!result.success) {
         setError(result.error);
-        setExcludedForAllergy(result.excludedForAllergy);
         return;
       }
       setSkippedFoods(result.skippedFoods);
-      setExcludedForAllergy(result.excludedForAllergy);
     });
   };
 

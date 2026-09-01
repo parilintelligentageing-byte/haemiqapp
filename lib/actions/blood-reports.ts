@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { anthropic } from "@/lib/anthropic/client";
 import { NO_BIOMARKERS_MARKER } from "@/lib/blood-report-failure";
-import type { BiomarkerFlag, BloodReport } from "@/lib/types/blood-report";
+import type { Biomarker, BiomarkerFlag, BloodReport } from "@/lib/types/blood-report";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -408,4 +408,32 @@ export async function getBloodReports(): Promise<BloodReport[]> {
   }
 
   return (data ?? []) as BloodReport[];
+}
+
+// Fetches just the latest completed report's biomarkers, without pulling
+// every report the user has ever uploaded (unlike getBloodReports) — for
+// callers that only ever need the current picture, e.g. meal plan context.
+export async function getLatestCompletedBiomarkers(): Promise<Biomarker[]> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) return [];
+
+  const { data, error } = await supabase
+    .from("blood_reports")
+    .select("biomarkers(*)")
+    .eq("user_id", user.id)
+    .eq("status", "completed")
+    .order("uploaded_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Failed to fetch latest completed biomarkers:", error.message);
+    return [];
+  }
+
+  return (data?.biomarkers as Biomarker[] | undefined) ?? [];
 }

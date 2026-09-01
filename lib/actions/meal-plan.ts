@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { anthropic } from "@/lib/anthropic/client";
-import { getBloodReports } from "@/lib/actions/blood-reports";
+import { getLatestCompletedBiomarkers } from "@/lib/actions/blood-reports";
+import { needsPreferencesGate } from "@/lib/meal-plan/preference-options";
 import {
   buildMatchFromDetail,
   searchFood,
@@ -11,22 +12,14 @@ import {
   type UsdaFoodDetail,
   type UsdaFoodMatch,
 } from "@/lib/usda/client";
-import type {
-  MealPlanFoodCategory,
-  MealPlanFoodPreparation,
-  MealPlanWithFoods,
+import {
+  MEAL_PLAN_FOOD_CATEGORIES,
+  type MealPlanFoodCategory,
+  type MealPlanFoodPreparation,
+  type MealPlanWithFoods,
 } from "@/lib/types/meal-plan";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
-
-const FOOD_CATEGORIES: MealPlanFoodCategory[] = [
-  "protein",
-  "carb",
-  "vegetable",
-  "fruit",
-  "dairy",
-  "other",
-];
 
 // Categories that read as "prepared" by default (meat, grains) vs.
 // "as-is" by default (produce, dairy) when Claude doesn't specify a
@@ -50,7 +43,7 @@ const PROPOSAL_SCHEMA = {
         type: "object",
         properties: {
           food_name: { type: "string" },
-          category: { type: "string", enum: FOOD_CATEGORIES },
+          category: { type: "string", enum: MEAL_PLAN_FOOD_CATEGORIES },
           preparation: { anyOf: [{ type: "string", enum: ["raw", "cooked"] }, { type: "null" }] },
           rationale: { type: "string" },
         },
@@ -100,6 +93,7 @@ export interface MealPlanContext {
     hrvAvg: number | null;
   } | null;
   profile: {
+    name: string | null;
     dietaryPreferences: string[];
     fitnessGoals: string[];
     activityLevel: string | null;
@@ -127,6 +121,7 @@ export async function getMealPlanContext(): Promise<MealPlanContext> {
       hasWearableData: false,
       wearableAverages: null,
       profile: {
+        name: null,
         dietaryPreferences: [],
         fitnessGoals: [],
         activityLevel: null,
@@ -136,9 +131,7 @@ export async function getMealPlanContext(): Promise<MealPlanContext> {
     };
   }
 
-  const reports = await getBloodReports();
-  const latestCompleted = reports.find((r) => r.status === "completed");
-  const biomarkers = latestCompleted?.biomarkers ?? [];
+  const biomarkers = await getLatestCompletedBiomarkers();
   const outOfRange = biomarkers.filter((b) => b.flag && b.flag !== "normal");
 
   const sevenDaysAgo = new Date();
@@ -150,26 +143,23 @@ export async function getMealPlanContext(): Promise<MealPlanContext> {
     .gte("date", sevenDaysAgo.toISOString().slice(0, 10));
 
   const rows = wearableRows ?? [];
+  const avgField = (key: keyof (typeof rows)[number]): number | null =>
+    average(rows.map((r) => r[key]).filter((v): v is number => v !== null));
+
   const wearableAverages =
     rows.length > 0
       ? {
-          sleepScore: average(rows.map((r) => r.sleep_score).filter((v): v is number => v !== null)),
-          readinessScore: average(
-            rows.map((r) => r.readiness_score).filter((v): v is number => v !== null)
-          ),
-          activityScore: average(
-            rows.map((r) => r.activity_score).filter((v): v is number => v !== null)
-          ),
-          restingHeartRate: average(
-            rows.map((r) => r.resting_heart_rate).filter((v): v is number => v !== null)
-          ),
-          hrvAvg: average(rows.map((r) => r.hrv_avg).filter((v): v is number => v !== null)),
+          sleepScore: avgField("sleep_score"),
+          readinessScore: avgField("readiness_score"),
+          activityScore: avgField("activity_score"),
+          restingHeartRate: avgField("resting_heart_rate"),
+          hrvAvg: avgField("hrv_avg"),
         }
       : null;
 
   const { data: profile } = await supabase
     .from("user_profiles")
-    .select("dietary_preferences, fitness_goals, activity_level, health_conditions, allergies")
+    .select("name, dietary_preferences, fitness_goals, activity_level, health_conditions, allergies")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -187,6 +177,7 @@ export async function getMealPlanContext(): Promise<MealPlanContext> {
     hasWearableData: rows.length > 0,
     wearableAverages,
     profile: {
+      name: profile?.name ?? null,
       dietaryPreferences: profile?.dietary_preferences ?? [],
       fitnessGoals: profile?.fitness_goals ?? [],
       activityLevel: profile?.activity_level ?? null,
@@ -321,12 +312,37 @@ async function lookupWithCache(
   return match;
 }
 
+// Batch read for generateMealPlan's food loop: one query for every food's
+// cache status instead of one query per food. Callers still fall back to
+// searchFood (a real USDA call) per miss, sequentially, so the rate-limit
+// stop behavior below is unaffected.
+async function getCachedMatches(
+  supabase: SupabaseServerClient,
+  searchKeys: string[]
+): Promise<Map<string, UsdaFoodMatch>> {
+  if (searchKeys.length === 0) return new Map();
+
+  const { data } = await supabase
+    .from("food_reference")
+    .select("search_key, usda_fdc_id, raw_json")
+    .in("search_key", searchKeys);
+
+  const matches = new Map<string, UsdaFoodMatch>();
+  for (const row of data ?? []) {
+    matches.set(row.search_key, buildMatchFromDetail(row.usda_fdc_id, row.raw_json as UsdaFoodDetail));
+  }
+  return matches;
+}
+
 export interface GenerateMealPlanResult {
   success: boolean;
   error: string | null;
   skippedFoods: string[];
   excludedForAllergy: string[];
-  rateLimited: boolean;
+}
+
+function fail(error: string, excludedForAllergy: string[] = []): GenerateMealPlanResult {
+  return { success: false, error, skippedFoods: [], excludedForAllergy };
 }
 
 export async function generateMealPlan(): Promise<GenerateMealPlanResult> {
@@ -336,16 +352,13 @@ export async function generateMealPlan(): Promise<GenerateMealPlanResult> {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return {
-      success: false,
-      error: "Not authenticated.",
-      skippedFoods: [],
-      excludedForAllergy: [],
-      rateLimited: false,
-    };
+    return fail("Not authenticated.");
   }
 
   const context = await getMealPlanContext();
+  if (needsPreferencesGate(context.profile)) {
+    return fail("Set your dietary preferences and goal before generating a meal plan.");
+  }
   const contextBlock = buildContextBlock(context);
 
   let payload: ProposalPayload;
@@ -378,23 +391,11 @@ export async function generateMealPlan(): Promise<GenerateMealPlanResult> {
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error.";
     console.error(`[meal-plan ${user.id}] proposal generation failed:`, message);
-    return {
-      success: false,
-      error: "Couldn't generate a food list right now. Please try again in a moment.",
-      skippedFoods: [],
-      excludedForAllergy: [],
-      rateLimited: false,
-    };
+    return fail("Couldn't generate a food list right now. Please try again in a moment.");
   }
 
   if (payload.foods.length === 0) {
-    return {
-      success: false,
-      error: "The AI didn't propose any foods. Please try again.",
-      skippedFoods: [],
-      excludedForAllergy: [],
-      rateLimited: false,
-    };
+    return fail("The AI didn't propose any foods. Please try again.");
   }
 
   // Safety net on top of the prompt's hard-constraint wording — drop any
@@ -414,13 +415,7 @@ export async function generateMealPlan(): Promise<GenerateMealPlanResult> {
   });
 
   if (safeFoods.length === 0) {
-    return {
-      success: false,
-      error: "Every proposed food conflicted with your allergies. Please try regenerating.",
-      skippedFoods: [],
-      excludedForAllergy,
-      rateLimited: false,
-    };
+    return fail("Every proposed food conflicted with your allergies. Please try regenerating.", excludedForAllergy);
   }
 
   // Only one non-archived plan at a time in Phase 1 — regenerating
@@ -439,29 +434,42 @@ export async function generateMealPlan(): Promise<GenerateMealPlanResult> {
 
   if (planError || !newPlan) {
     console.error(`[meal-plan ${user.id}] plan insert failed:`, planError?.message);
-    return {
-      success: false,
-      error: "Couldn't save your meal plan. Please try again.",
-      skippedFoods: [],
-      excludedForAllergy,
-      rateLimited: false,
-    };
+    return fail("Couldn't save your meal plan. Please try again.", excludedForAllergy);
   }
+
+  const preparations = safeFoods.map((food) => food.preparation ?? defaultPreparation(food.category));
+  const searchKeys = safeFoods.map((food, i) => normalizeSearchKey(food.food_name, preparations[i]));
+  const cachedMatches = await getCachedMatches(supabase, searchKeys);
 
   const skippedFoods: string[] = [];
   const rows: Array<Record<string, unknown>> = [];
+  const newCacheRows = new Map<string, Record<string, unknown>>();
   let rateLimited = false;
 
-  for (const food of safeFoods) {
+  for (let i = 0; i < safeFoods.length; i++) {
+    const food = safeFoods[i];
+    const preparation = preparations[i];
+    const searchKey = searchKeys[i];
+
     if (rateLimited) {
       skippedFoods.push(food.food_name);
       continue;
     }
 
-    const preparation = food.preparation ?? defaultPreparation(food.category);
-
     try {
-      const match = await lookupWithCache(supabase, food.food_name, preparation);
+      let match = cachedMatches.get(searchKey) ?? null;
+      if (!match) {
+        match = await searchFood(food.food_name, preparation);
+        if (match) {
+          newCacheRows.set(searchKey, {
+            search_key: searchKey,
+            usda_fdc_id: match.fdcId,
+            food_name: food.food_name,
+            raw_json: match.raw as object,
+          });
+        }
+      }
+
       if (!match) {
         skippedFoods.push(food.food_name);
         continue;
@@ -494,23 +502,23 @@ export async function generateMealPlan(): Promise<GenerateMealPlanResult> {
     }
   }
 
+  if (newCacheRows.size > 0) {
+    await supabase
+      .from("food_reference")
+      .upsert([...newCacheRows.values()], { onConflict: "search_key" });
+  }
+
   if (rows.length > 0) {
     const { error: foodsError } = await supabase.from("meal_plan_foods").insert(rows);
     if (foodsError) {
       console.error(`[meal-plan ${user.id}] food rows insert failed:`, foodsError.message);
-      return {
-        success: false,
-        error: "Couldn't save your food list. Please try again.",
-        skippedFoods: [],
-        excludedForAllergy,
-        rateLimited: false,
-      };
+      return fail("Couldn't save your food list. Please try again.", excludedForAllergy);
     }
   }
 
   revalidatePath("/meal-plan");
 
-  return { success: true, error: null, skippedFoods, excludedForAllergy, rateLimited };
+  return { success: true, error: null, skippedFoods, excludedForAllergy };
 }
 
 export async function getCurrentMealPlan(): Promise<MealPlanWithFoods | null> {
@@ -574,9 +582,24 @@ export async function addUserFood(_prevState: AddFoodState, formData: FormData):
     return { error: "Not authenticated." };
   }
 
+  const { data: profileRow } = await supabase
+    .from("user_profiles")
+    .select("allergies")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  const allergen = matchedAllergen(foodName, profileRow?.allergies ?? []);
+  if (allergen) {
+    return { error: `"${foodName}" conflicts with your allergy to ${allergen}.` };
+  }
+
   try {
-    const match = await lookupWithCache(supabase, foodName, "raw");
-    const resolvedMatch = match ?? (await lookupWithCache(supabase, foodName, "cooked"));
+    let preparation: MealPlanFoodPreparation = "raw";
+    let resolvedMatch = await lookupWithCache(supabase, foodName, preparation);
+    if (!resolvedMatch) {
+      preparation = "cooked";
+      resolvedMatch = await lookupWithCache(supabase, foodName, preparation);
+    }
 
     if (!resolvedMatch) {
       return { error: `Couldn't find nutrition data for "${foodName}". Try a more generic name.` };
@@ -587,7 +610,7 @@ export async function addUserFood(_prevState: AddFoodState, formData: FormData):
       food_name: foodName,
       usda_fdc_id: resolvedMatch.fdcId,
       quantity_grams: resolvedMatch.quantityGrams,
-      preparation: match ? "raw" : "cooked",
+      preparation,
       calories: resolvedMatch.calories,
       protein_g: resolvedMatch.proteinG,
       carbs_g: resolvedMatch.carbsG,

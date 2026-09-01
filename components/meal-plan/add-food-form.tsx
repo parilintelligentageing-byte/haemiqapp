@@ -23,12 +23,13 @@ function SubmitButton() {
 export function AddFoodForm({ mealPlanId }: { mealPlanId: string }) {
   const [state, formAction] = useActionState(addUserFood, initialState);
   const formRef = useRef<HTMLFormElement>(null);
-  const wasError = useRef(false);
+  const prevError = useRef<string | null>(null);
 
+  // Reset only after a submission that just cleared a previous error —
+  // never on the very first render, and never while an error is showing.
   useEffect(() => {
-    if (!state.error && !wasError.current) return;
-    if (!state.error) formRef.current?.reset();
-    wasError.current = Boolean(state.error);
+    if (prevError.current && !state.error) formRef.current?.reset();
+    prevError.current = state.error;
   }, [state.error]);
 
   return (

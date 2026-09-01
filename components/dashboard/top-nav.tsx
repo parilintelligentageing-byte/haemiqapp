@@ -11,6 +11,11 @@ export function TopNav({
 }) {
   const initial = name.trim().charAt(0).toUpperCase() || "?";
 
+  const links = [
+    { show: showMealPlanLink, href: "/meal-plan", label: "Meal Plan" },
+    { show: showSuggestedTestsLink, href: "/suggested-tests", label: "Suggested Tests" },
+  ].filter((link) => link.show);
+
   return (
     <nav className="flex flex-col gap-3 py-6">
       <div className="flex items-center justify-between">
@@ -29,14 +34,15 @@ export function TopNav({
         </div>
       </div>
 
-      {(showSuggestedTestsLink || showMealPlanLink) && (
+      {links.length > 0 && (
         <div className="flex justify-end gap-3">
-          {showMealPlanLink && (
+          {links.map((link) => (
             <Link
-              href="/meal-plan"
+              key={link.href}
+              href={link.href}
               className="group flex items-center gap-1.5 rounded-full border border-line bg-surface px-[18px] py-2.5 font-serif text-sm text-ink italic transition-colors hover:border-teal hover:bg-white/[0.03]"
             >
-              Meal Plan
+              {link.label}
               <span
                 aria-hidden="true"
                 className="text-gold transition-transform duration-200 group-hover:translate-x-1"
@@ -44,21 +50,7 @@ export function TopNav({
                 →
               </span>
             </Link>
-          )}
-          {showSuggestedTestsLink && (
-            <Link
-              href="/suggested-tests"
-              className="group flex items-center gap-1.5 rounded-full border border-line bg-surface px-[18px] py-2.5 font-serif text-sm text-ink italic transition-colors hover:border-teal hover:bg-white/[0.03]"
-            >
-              Suggested Tests
-              <span
-                aria-hidden="true"
-                className="text-gold transition-transform duration-200 group-hover:translate-x-1"
-              >
-                →
-              </span>
-            </Link>
-          )}
+          ))}
         </div>
       )}
     </nav>

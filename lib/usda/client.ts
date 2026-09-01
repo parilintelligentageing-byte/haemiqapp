@@ -133,7 +133,6 @@ function pickCommonServingGrams(portions: UsdaFoodPortion[] | undefined): number
 
 export interface UsdaFoodMatch {
   fdcId: string;
-  matchedDescription: string;
   quantityGrams: number;
   calories: number | null;
   proteinG: number | null;
@@ -158,7 +157,6 @@ export function buildMatchFromDetail(fdcId: string, detail: UsdaFoodDetail): Usd
 
   return {
     fdcId,
-    matchedDescription: detail.description,
     quantityGrams,
     calories: scale(macros.caloriesPer100g, quantityGrams),
     proteinG: scale(macros.proteinPer100g, quantityGrams),

@@ -15,3 +15,13 @@ export const GOAL_OPTIONS = [
   "General longevity",
   "Manage a specific marker",
 ] as const;
+
+// Plan generation requires at least a diet and a goal to ground the
+// prompt's hard constraints — enforced both at the UI gate and inside
+// generateMealPlan itself, so any future entry point can't bypass it.
+export function needsPreferencesGate(profile: {
+  dietaryPreferences: string[];
+  fitnessGoals: string[];
+}): boolean {
+  return profile.dietaryPreferences.length === 0 || profile.fitnessGoals.length === 0;
+}

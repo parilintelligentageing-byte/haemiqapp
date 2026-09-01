@@ -7,18 +7,8 @@ import { FoodCard } from "@/components/meal-plan/food-card";
 import { AddFoodForm } from "@/components/meal-plan/add-food-form";
 import { GeneratePlanButton } from "@/components/meal-plan/generate-plan-button";
 import { PreferencesForm } from "@/components/meal-plan/preferences-form";
-import type { MealPlanFoodCategory } from "@/lib/types/meal-plan";
-
-const CATEGORY_ORDER: MealPlanFoodCategory[] = ["protein", "carb", "vegetable", "fruit", "dairy", "other"];
-
-const CATEGORY_LABELS: Record<MealPlanFoodCategory, string> = {
-  protein: "Protein",
-  carb: "Carbs",
-  vegetable: "Vegetables",
-  fruit: "Fruit",
-  dairy: "Dairy",
-  other: "Other",
-};
+import { needsPreferencesGate } from "@/lib/meal-plan/preference-options";
+import { MEAL_PLAN_FOOD_CATEGORIES, MEAL_PLAN_CATEGORY_LABELS } from "@/lib/types/meal-plan";
 
 export default async function MealPlanPage() {
   const supabase = await createClient();
@@ -30,28 +20,16 @@ export default async function MealPlanPage() {
     redirect("/login");
   }
 
-  const { data: profile } = await supabase
-    .from("user_profiles")
-    .select("name")
-    .eq("id", user.id)
-    .maybeSingle();
-
   const [plan, context] = await Promise.all([getCurrentMealPlan(), getMealPlanContext()]);
 
-  // Once diet + goal are set once, the gate never shows again — allergies
-  // is intentionally excluded from this check since an empty list is a
-  // valid answer ("no allergies"), not a sign the gate was skipped.
-  const needsPreferencesGate =
-    context.profile.dietaryPreferences.length === 0 || context.profile.fitnessGoals.length === 0;
-
-  const foodsByCategory = CATEGORY_ORDER.map((category) => ({
+  const foodsByCategory = MEAL_PLAN_FOOD_CATEGORIES.map((category) => ({
     category,
     foods: (plan?.meal_plan_foods ?? []).filter((food) => food.category === category),
   })).filter((group) => group.foods.length > 0);
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-6 pb-24">
-      <TopNav name={profile?.name ?? "there"} />
+      <TopNav name={context.profile.name ?? "there"} />
 
       <Link
         href="/dashboard"
@@ -79,7 +57,7 @@ export default async function MealPlanPage() {
         </div>
       )}
 
-      {needsPreferencesGate ? (
+      {needsPreferencesGate(context.profile) ? (
         <div className="mt-10">
           <PreferencesForm
             initialDietaryPreferences={context.profile.dietaryPreferences}
@@ -121,7 +99,7 @@ export default async function MealPlanPage() {
             {foodsByCategory.map(({ category, foods }) => (
               <div key={category}>
                 <div className="flex items-baseline justify-between">
-                  <h2 className="font-serif text-xl text-ink italic">{CATEGORY_LABELS[category]}</h2>
+                  <h2 className="font-serif text-xl text-ink italic">{MEAL_PLAN_CATEGORY_LABELS[category]}</h2>
                   <span className="font-sans text-xs font-bold tracking-[0.2em] text-gold uppercase">
                     {foods.length} {foods.length === 1 ? "food" : "foods"}
                   </span>

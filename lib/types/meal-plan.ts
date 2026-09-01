@@ -3,6 +3,24 @@ export type MealPlanFoodPreparation = "raw" | "cooked";
 export type MealPlanFoodCategory = "protein" | "carb" | "vegetable" | "fruit" | "dairy" | "other";
 export type MealPlanFoodStatus = "proposed" | "accepted" | "rejected";
 
+export const MEAL_PLAN_FOOD_CATEGORIES: MealPlanFoodCategory[] = [
+  "protein",
+  "carb",
+  "vegetable",
+  "fruit",
+  "dairy",
+  "other",
+];
+
+export const MEAL_PLAN_CATEGORY_LABELS: Record<MealPlanFoodCategory, string> = {
+  protein: "Protein",
+  carb: "Carbs",
+  vegetable: "Vegetables",
+  fruit: "Fruit",
+  dairy: "Dairy",
+  other: "Other",
+};
+
 export interface MealPlan {
   id: string;
   user_id: string;
