@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useRef } from "react";
 import { useFormStatus } from "react-dom";
 import { addUserFood, type AddFoodState } from "@/lib/actions/meal-plan";
+import { MEAL_TYPE_LABELS, MEAL_TYPE_ORDER } from "@/lib/types/meal-plan";
 
 const initialState: AddFoodState = { error: null };
 
@@ -46,6 +47,17 @@ export function AddFoodForm({ mealPlanId }: { mealPlanId: string }) {
           required
           className="w-full flex-1 rounded-full border border-line bg-transparent px-4 py-2.5 font-sans text-sm text-ink placeholder:text-text-soft focus:border-teal focus:outline-none"
         />
+        <select
+          name="mealType"
+          defaultValue="snack"
+          className="rounded-full border border-line bg-transparent px-4 py-2.5 font-sans text-sm text-ink focus:border-teal focus:outline-none"
+        >
+          {MEAL_TYPE_ORDER.map((mealType) => (
+            <option key={mealType} value={mealType} className="bg-surface text-ink">
+              {MEAL_TYPE_LABELS[mealType]}
+            </option>
+          ))}
+        </select>
         <SubmitButton />
       </form>
       {state.error && (

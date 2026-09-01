@@ -8,14 +8,17 @@ export function GeneratePlanButton({ hasExistingPlan }: { hasExistingPlan: boole
   const [error, setError] = useState<string | null>(null);
   const [skippedFoods, setSkippedFoods] = useState<string[]>([]);
   const [excludedForAllergy, setExcludedForAllergy] = useState<string[]>([]);
+  const [excludedForPreference, setExcludedForPreference] = useState<string[]>([]);
 
   const handleClick = () => {
     setError(null);
     setSkippedFoods([]);
     setExcludedForAllergy([]);
+    setExcludedForPreference([]);
     startTransition(async () => {
       const result = await generateMealPlan();
       setExcludedForAllergy(result.excludedForAllergy);
+      setExcludedForPreference(result.excludedForPreference);
       if (!result.success) {
         setError(result.error);
         return;
@@ -47,6 +50,12 @@ export function GeneratePlanButton({ hasExistingPlan }: { hasExistingPlan: boole
         </p>
       )}
 
+      {excludedForPreference.length > 0 && (
+        <p className="max-w-md font-sans text-xs text-text-soft">
+          Excluded per your preferences: {excludedForPreference.join(", ")}.
+        </p>
+      )}
+
       {skippedFoods.length > 0 && (
         <p className="max-w-md font-sans text-xs text-text-soft">
           Couldn&apos;t find nutrition data for: {skippedFoods.join(", ")}. Everything else was added.
@@ -57,7 +66,8 @@ export function GeneratePlanButton({ hasExistingPlan }: { hasExistingPlan: boole
         !isPending &&
         !error &&
         skippedFoods.length === 0 &&
-        excludedForAllergy.length === 0 && (
+        excludedForAllergy.length === 0 &&
+        excludedForPreference.length === 0 && (
           <p className="max-w-md font-sans text-xs text-text-soft">
             Regenerating replaces your current food list below.
           </p>

@@ -2,8 +2,9 @@
 
 import { useState, useTransition } from "react";
 import { updateFoodStatus } from "@/lib/actions/meal-plan";
+import { setFoodPreference } from "@/lib/actions/food-preferences";
 import { MEAL_PLAN_CATEGORY_LABELS } from "@/lib/types/meal-plan";
-import type { MealPlanFood } from "@/lib/types/meal-plan";
+import type { FoodPreferenceType, MealPlanFood } from "@/lib/types/meal-plan";
 
 const STATUS_BUTTONS = [
   { status: "accepted" as const, label: "Accept food", glyph: "✓", color: "var(--color-teal)" },
@@ -22,11 +23,19 @@ function nutritionLine(food: MealPlanFood): string {
 export function FoodCard({ food }: { food: MealPlanFood }) {
   const [status, setStatus] = useState(food.status);
   const [isPending, startTransition] = useTransition();
+  const [prefSaved, setPrefSaved] = useState<FoodPreferenceType | null>(null);
 
   const handleSetStatus = (next: "accepted" | "rejected") => {
     setStatus(next);
     startTransition(() => {
       updateFoodStatus(food.id, next);
+    });
+  };
+
+  const handleRemember = (preference: FoodPreferenceType) => {
+    setPrefSaved(preference);
+    startTransition(() => {
+      setFoodPreference(food.food_name, food.usda_fdc_id, preference);
     });
   };
 
@@ -48,25 +57,49 @@ export function FoodCard({ food }: { food: MealPlanFood }) {
           <p className="mt-1 font-serif text-lg text-ink italic">{quantityLabel}</p>
         </div>
 
-        <div className="flex shrink-0 items-center gap-1.5">
-          {STATUS_BUTTONS.map((button) => (
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <div className="flex items-center gap-1.5">
+            {STATUS_BUTTONS.map((button) => (
+              <button
+                key={button.status}
+                type="button"
+                aria-label={button.label}
+                aria-pressed={status === button.status}
+                disabled={isPending}
+                onClick={() => handleSetStatus(button.status)}
+                className="flex h-7 w-7 items-center justify-center rounded-full border text-xs transition-colors disabled:opacity-50"
+                style={
+                  status === button.status
+                    ? { borderColor: button.color, backgroundColor: button.color, color: "var(--color-paper)" }
+                    : { borderColor: "var(--color-line)", color: "var(--color-text-soft)" }
+                }
+              >
+                {button.glyph}
+              </button>
+            ))}
+          </div>
+
+          {prefSaved ? (
+            <p className="font-sans text-[10px] text-sage">
+              {prefSaved === "excluded" ? "Won't suggest again" : "Always included"}
+            </p>
+          ) : status === "rejected" ? (
             <button
-              key={button.status}
               type="button"
-              aria-label={button.label}
-              aria-pressed={status === button.status}
-              disabled={isPending}
-              onClick={() => handleSetStatus(button.status)}
-              className="flex h-7 w-7 items-center justify-center rounded-full border text-xs transition-colors disabled:opacity-50"
-              style={
-                status === button.status
-                  ? { borderColor: button.color, backgroundColor: button.color, color: "var(--color-paper)" }
-                  : { borderColor: "var(--color-line)", color: "var(--color-text-soft)" }
-              }
+              onClick={() => handleRemember("excluded")}
+              className="font-sans text-[10px] text-text-soft underline-offset-2 transition-colors hover:text-ink hover:underline"
             >
-              {button.glyph}
+              Don&apos;t suggest again
             </button>
-          ))}
+          ) : status === "accepted" ? (
+            <button
+              type="button"
+              onClick={() => handleRemember("preferred")}
+              className="font-sans text-[10px] text-text-soft underline-offset-2 transition-colors hover:text-ink hover:underline"
+            >
+              Always suggest this
+            </button>
+          ) : null}
         </div>
       </div>
 

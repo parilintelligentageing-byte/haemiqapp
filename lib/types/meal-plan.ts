@@ -2,6 +2,8 @@ export type MealPlanStatus = "draft" | "active" | "archived";
 export type MealPlanFoodPreparation = "raw" | "cooked";
 export type MealPlanFoodCategory = "protein" | "carb" | "vegetable" | "fruit" | "dairy" | "other";
 export type MealPlanFoodStatus = "proposed" | "accepted" | "rejected";
+export type MealType = "breakfast" | "lunch" | "dinner" | "snack";
+export type FoodPreferenceType = "excluded" | "preferred";
 
 export const MEAL_PLAN_FOOD_CATEGORIES: MealPlanFoodCategory[] = [
   "protein",
@@ -19,6 +21,15 @@ export const MEAL_PLAN_CATEGORY_LABELS: Record<MealPlanFoodCategory, string> = {
   fruit: "Fruit",
   dairy: "Dairy",
   other: "Other",
+};
+
+export const MEAL_TYPE_ORDER: MealType[] = ["breakfast", "lunch", "dinner", "snack"];
+
+export const MEAL_TYPE_LABELS: Record<MealType, string> = {
+  breakfast: "Breakfast",
+  lunch: "Lunch",
+  dinner: "Dinner",
+  snack: "Snacks",
 };
 
 export interface MealPlan {
@@ -41,6 +52,7 @@ export interface MealPlanFood {
   carbs_g: number | null;
   fat_g: number | null;
   category: MealPlanFoodCategory;
+  meal_type: MealType;
   rationale: string | null;
   status: MealPlanFoodStatus;
   is_user_added: boolean;
@@ -49,4 +61,13 @@ export interface MealPlanFood {
 
 export interface MealPlanWithFoods extends MealPlan {
   meal_plan_foods: MealPlanFood[];
+}
+
+export interface FoodPreference {
+  id: string;
+  user_id: string;
+  food_name: string;
+  usda_fdc_id: string | null;
+  preference: FoodPreferenceType;
+  created_at: string;
 }

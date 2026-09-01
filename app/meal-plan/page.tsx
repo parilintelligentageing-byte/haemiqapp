@@ -2,13 +2,14 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentMealPlan, getMealPlanContext } from "@/lib/actions/meal-plan";
+import { getTodaysMealLogs } from "@/lib/actions/meal-logs";
 import { TopNav } from "@/components/dashboard/top-nav";
-import { FoodCard } from "@/components/meal-plan/food-card";
+import { MealSection } from "@/components/meal-plan/meal-section";
 import { AddFoodForm } from "@/components/meal-plan/add-food-form";
 import { GeneratePlanButton } from "@/components/meal-plan/generate-plan-button";
 import { PreferencesForm } from "@/components/meal-plan/preferences-form";
 import { needsPreferencesGate } from "@/lib/meal-plan/preference-options";
-import { MEAL_PLAN_FOOD_CATEGORIES, MEAL_PLAN_CATEGORY_LABELS } from "@/lib/types/meal-plan";
+import { MEAL_TYPE_ORDER } from "@/lib/types/meal-plan";
 
 export default async function MealPlanPage() {
   const supabase = await createClient();
@@ -21,10 +22,11 @@ export default async function MealPlanPage() {
   }
 
   const [plan, context] = await Promise.all([getCurrentMealPlan(), getMealPlanContext()]);
+  const todaysLogs = plan ? await getTodaysMealLogs(plan.id) : [];
 
-  const foodsByCategory = MEAL_PLAN_FOOD_CATEGORIES.map((category) => ({
-    category,
-    foods: (plan?.meal_plan_foods ?? []).filter((food) => food.category === category),
+  const foodsByMealType = MEAL_TYPE_ORDER.map((mealType) => ({
+    mealType,
+    foods: (plan?.meal_plan_foods ?? []).filter((food) => food.meal_type === mealType),
   })).filter((group) => group.foods.length > 0);
 
   return (
@@ -96,20 +98,14 @@ export default async function MealPlanPage() {
           )}
 
           <div className="mt-10 flex flex-col gap-10">
-            {foodsByCategory.map(({ category, foods }) => (
-              <div key={category}>
-                <div className="flex items-baseline justify-between">
-                  <h2 className="font-serif text-xl text-ink italic">{MEAL_PLAN_CATEGORY_LABELS[category]}</h2>
-                  <span className="font-sans text-xs font-bold tracking-[0.2em] text-gold uppercase">
-                    {foods.length} {foods.length === 1 ? "food" : "foods"}
-                  </span>
-                </div>
-                <div className="mt-4 grid grid-cols-1 items-start gap-3 sm:grid-cols-2">
-                  {foods.map((food) => (
-                    <FoodCard key={food.id} food={food} />
-                  ))}
-                </div>
-              </div>
+            {foodsByMealType.map(({ mealType, foods }) => (
+              <MealSection
+                key={mealType}
+                mealPlanId={plan.id}
+                mealType={mealType}
+                foods={foods}
+                initiallyLogged={todaysLogs.includes(mealType)}
+              />
             ))}
           </div>
 
