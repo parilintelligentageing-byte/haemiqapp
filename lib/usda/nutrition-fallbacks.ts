@@ -28,6 +28,14 @@ export const NUTRITION_FALLBACKS: Record<string, NutritionFallback> = {
     note:
       'USDA Foundation fdcId 748608 ("Oil, olive, extra virgin") has no proximate/energy nutrients on file — only a fatty-acid breakdown. Values taken from USDA SR Legacy fdcId 171413 ("Oil, olive, salad or cooking"), USDA\'s own complete reference for the same food.',
   },
+  "olive oil": {
+    caloriesPer100g: 884,
+    proteinPer100g: 0,
+    carbsPer100g: 0,
+    fatPer100g: 100,
+    note:
+      'USDA Foundation fdcId 1750351 ("Oil, olive, extra light") has no proximate/energy nutrients on file, same gap as "extra virgin olive oil" above — olive oil is ~100% fat regardless of grade, so the same USDA SR Legacy fdcId 171413 ("Oil, olive, salad or cooking") reference values apply.',
+  },
 };
 
 export function findNutritionFallback(foodName: string): NutritionFallback | null {

@@ -1,5 +1,6 @@
 import { getCalorieTargetData, getPlanMicronutrientTotals } from "@/lib/actions/calorie-target";
 import { getCurrentMealPlan } from "@/lib/actions/meal-plan";
+import { calculateMicronutrientTargets, evaluateMicronutrientGaps } from "@/lib/nutrition/micronutrient-targets";
 import { CalorieSummaryBarClient } from "@/components/meal-plan/calorie-summary-bar-client";
 
 // Anchors the /meal-plan page the way VitalitySection anchors the
@@ -24,8 +25,10 @@ export async function CalorieSummaryBar() {
   );
 
   const micronutrients = await getPlanMicronutrientTotals(activeFoods);
+  const microTargets = calculateMicronutrientTargets(target?.gender ?? null);
+  const microGaps = evaluateMicronutrientGaps(micronutrients, microTargets);
 
-  return <CalorieSummaryBarClient target={target} totals={totals} micronutrients={micronutrients} />;
+  return <CalorieSummaryBarClient target={target} totals={totals} microGaps={microGaps} />;
 }
 
 export function CalorieSummaryBarSkeleton() {

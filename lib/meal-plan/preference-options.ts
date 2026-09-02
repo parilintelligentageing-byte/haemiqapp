@@ -12,6 +12,7 @@ export const DIETARY_OPTIONS = [
 export const GOAL_OPTIONS = [
   "Weight loss",
   "Muscle gain",
+  "Body Recomposition",
   "General longevity",
   "Manage a specific marker",
 ] as const;
@@ -30,9 +31,11 @@ export const GOAL_INTENSITY_OPTIONS = [
   { value: "aggressive", label: "Aggressive" },
 ] as const;
 
-// Goals for which a calorie-target "how aggressively" dial makes sense —
-// maintenance/longevity and marker-management goals don't have one.
-export const INTENSITY_RELEVANT_GOALS = new Set<string>(["Weight loss", "Muscle gain"]);
+// Goals for which a calorie-target "how aggressively" dial makes sense.
+// Muscle Gain and Body Recomposition each use one fixed formula instead
+// (see lib/nutrition/calorie-targets.ts) — only Weight loss (Fat Loss)
+// has a mild/moderate/aggressive dial.
+export const INTENSITY_RELEVANT_GOALS = new Set<string>(["Weight loss"]);
 
 // Plan generation requires at least a diet and a goal to ground the
 // prompt's hard constraints — enforced both at the UI gate and inside

@@ -25,6 +25,12 @@ const INTENSITY_LABELS: Record<GoalIntensity, string> = {
 
 const WEIGHT_LOSS_GOALS = new Set(["Weight loss"]);
 const MUSCLE_GAIN_GOALS = new Set(["Muscle gain"]);
+const BODY_RECOMP_GOALS = new Set(["Body Recomposition"]);
+
+// Muscle Gain uses one fixed surplus rather than the mild/moderate/
+// aggressive dial Fat Loss has — see lib/meal-plan/preference-options.ts,
+// where it's removed from INTENSITY_RELEVANT_GOALS to match.
+const MUSCLE_GAIN_SURPLUS = 0.1;
 
 // Mifflin-St Jeor's offset term. Non-binary/prefer-not-to-say profiles use
 // the average of the male (+5) and female (-161) offsets — there's no
@@ -77,21 +83,28 @@ export interface CalorieTargetResult {
   proteinTargetG: number;
   fatTargetG: number;
   carbTargetG: number;
+  gender: Gender | null;
 }
 
 // Protein is derived from bodyweight FIRST, not as a share of calories —
-// otherwise it silently gets squeezed out by whatever's left over. 2.0
-// g/kg is the top of the evidence-based 1.6-2.2 g/kg range for
-// preserving/building lean mass; 1.2 g/kg covers maintenance/longevity
-// goals where there's no deficit or surplus to protect against.
-const HIGH_PROTEIN_GOALS = new Set(["Weight loss", "Muscle gain"]);
-const HIGH_PROTEIN_FACTOR = 2.0;
+// otherwise it silently gets squeezed out by whatever's left over. Factors
+// per goal, evidence-based ranges: Fat Loss 2.0 g/kg (top of the 1.6-2.2
+// g/kg range, to preserve lean mass in a deficit), Muscle Gain 1.8 g/kg,
+// Body Recomposition 2.2 g/kg (highest of the three — simultaneously
+// building and losing needs the most protection), 1.2 g/kg for
+// maintenance/longevity goals with no deficit or surplus to protect
+// against.
+const FAT_LOSS_PROTEIN_FACTOR = 2.0;
+const MUSCLE_GAIN_PROTEIN_FACTOR = 1.8;
+const BODY_RECOMP_PROTEIN_FACTOR = 2.2;
 const MAINTENANCE_PROTEIN_FACTOR = 1.2;
 
-// Fat is a fixed share of the TOTAL target (not the calorie remainder
-// after protein) so it never gets squeezed out as an afterthought —
-// relevant here since elevated cholesterol is a flagged biomarker for
-// this user base. Carbs absorb whatever's left.
+// Fat Loss/Muscle Gain/Body Recomposition all use a bodyweight-based fat
+// floor (0.8 g/kg) rather than a share of calories, so it never gets
+// squeezed to nothing by an aggressive deficit or surplus. Goals outside
+// those three (no g/kg spec given) keep the original fixed share of total
+// calories.
+const GKG_FAT_FLOOR = 0.8;
 const FAT_SHARE_OF_TOTAL = 0.25;
 
 function calculateMacroTargets(
@@ -99,11 +112,24 @@ function calculateMacroTargets(
   primaryGoal: string | null,
   targetCalories: number
 ): { proteinTargetG: number; fatTargetG: number; carbTargetG: number } {
-  const proteinFactor = primaryGoal && HIGH_PROTEIN_GOALS.has(primaryGoal) ? HIGH_PROTEIN_FACTOR : MAINTENANCE_PROTEIN_FACTOR;
+  let proteinFactor = MAINTENANCE_PROTEIN_FACTOR;
+  let useGkgFat = false;
+
+  if (primaryGoal && WEIGHT_LOSS_GOALS.has(primaryGoal)) {
+    proteinFactor = FAT_LOSS_PROTEIN_FACTOR;
+    useGkgFat = true;
+  } else if (primaryGoal && MUSCLE_GAIN_GOALS.has(primaryGoal)) {
+    proteinFactor = MUSCLE_GAIN_PROTEIN_FACTOR;
+    useGkgFat = true;
+  } else if (primaryGoal && BODY_RECOMP_GOALS.has(primaryGoal)) {
+    proteinFactor = BODY_RECOMP_PROTEIN_FACTOR;
+    useGkgFat = true;
+  }
+
   const proteinTargetG = Math.round(weightKg * proteinFactor);
   const proteinKcal = proteinTargetG * 4;
 
-  const fatKcal = targetCalories * FAT_SHARE_OF_TOTAL;
+  const fatKcal = useGkgFat ? weightKg * GKG_FAT_FLOOR * 9 : targetCalories * FAT_SHARE_OF_TOTAL;
   const fatTargetG = Math.round(fatKcal / 9);
 
   const carbKcal = Math.max(0, targetCalories - proteinKcal - fatKcal);
@@ -127,12 +153,11 @@ export function calculateTargetCalories(input: CalorieTargetInput): CalorieTarge
       goalLabel = "Fat loss";
     }
   } else if (input.primaryGoal && MUSCLE_GAIN_GOALS.has(input.primaryGoal)) {
-    if (input.goalIntensity) {
-      rawTarget = tdee * (1 + INTENSITY_ADJUSTMENT[input.goalIntensity]);
-      goalLabel = `${INTENSITY_LABELS[input.goalIntensity]} muscle gain`;
-    } else {
-      goalLabel = "Muscle gain";
-    }
+    rawTarget = tdee * (1 + MUSCLE_GAIN_SURPLUS);
+    goalLabel = "Muscle gain";
+  } else if (input.primaryGoal && BODY_RECOMP_GOALS.has(input.primaryGoal)) {
+    rawTarget = tdee;
+    goalLabel = "Body recomposition";
   } else if (input.primaryGoal) {
     goalLabel = "Maintenance";
   }
@@ -158,5 +183,6 @@ export function calculateTargetCalories(input: CalorieTargetInput): CalorieTarge
     proteinTargetG,
     fatTargetG,
     carbTargetG,
+    gender: input.gender,
   };
 }

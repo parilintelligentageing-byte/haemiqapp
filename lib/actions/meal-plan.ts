@@ -356,7 +356,7 @@ function buildContextBlock(context: MealPlanContext): string {
     const t = context.calorieTarget;
     lines.push(
       `Daily calorie target: ~${t.targetCalories} kcal${t.goalLabel ? ` (${t.goalLabel})` : ""} — favor appropriately-sized, realistic portions; avoid choices whose typical serving would blow well past this budget.`,
-      `Daily protein target: ~${t.proteinTargetG}g — favor protein-forward selections (legumes, tofu, tempeh, dairy, or lean meats consistent with the diet) across meals, so there's enough protein-category food for realistic portions to reach this.`
+      `Daily protein target: ~${t.proteinTargetG}g and daily fat target: ~${t.fatTargetG}g — when a protein-category food is needed, prefer genuinely lean, lower-fat options (e.g. white fish, chicken/turkey breast, egg whites, cottage cheese, lentils, chickpeas, black beans, tofu) over meaningfully fattier ones (e.g. tempeh, salmon, nuts, nut butters) whenever the diet allows it, so hitting the protein target doesn't blow past the fat target. This matters most on a vegetarian or vegan diet: legumes and tofu are meaningfully leaner protein-category choices than tempeh or nuts, so lean on those first and reach for the fattier options only when the diet or a stated preference rules the leaner ones out.`
     );
   }
   lines.push(
@@ -506,6 +506,8 @@ interface ResolvedFoodRow {
 export interface ResolveAndInsertTargets {
   calories: number;
   proteinG: number;
+  carbsG: number;
+  fatG: number;
 }
 
 interface ResolveAndInsertResult {
@@ -863,7 +865,12 @@ export async function generateMealPlan(): Promise<GenerateMealPlanResult> {
   }
 
   const targets: ResolveAndInsertTargets | null = context.calorieTarget
-    ? { calories: context.calorieTarget.targetCalories, proteinG: context.calorieTarget.proteinTargetG }
+    ? {
+        calories: context.calorieTarget.targetCalories,
+        proteinG: context.calorieTarget.proteinTargetG,
+        carbsG: context.calorieTarget.carbTargetG,
+        fatG: context.calorieTarget.fatTargetG,
+      }
     : null;
 
   let resolved: ResolveAndInsertResult;
@@ -937,7 +944,7 @@ export async function swapMealType(mealPlanId: string, mealType: MealType): Prom
 
   const { data: existingFoods } = await supabase
     .from("meal_plan_foods")
-    .select("food_name, meal_type, status, calories, protein_g")
+    .select("food_name, meal_type, status, calories, protein_g, carbs_g, fat_g")
     .eq("meal_plan_id", mealPlanId)
     .neq("status", "rejected");
 
@@ -950,6 +957,12 @@ export async function swapMealType(mealPlanId: string, mealType: MealType): Prom
   const otherMealsProtein = (existingFoods ?? [])
     .filter((f) => f.meal_type !== mealType)
     .reduce((sum, f) => sum + (f.protein_g ?? 0), 0);
+  const otherMealsCarbs = (existingFoods ?? [])
+    .filter((f) => f.meal_type !== mealType)
+    .reduce((sum, f) => sum + (f.carbs_g ?? 0), 0);
+  const otherMealsFat = (existingFoods ?? [])
+    .filter((f) => f.meal_type !== mealType)
+    .reduce((sum, f) => sum + (f.fat_g ?? 0), 0);
   const existingBlock =
     otherFoods.length > 0
       ? `Foods already in this plan for other meals (avoid proposing duplicates): ${otherFoods.join(", ")}.`
@@ -1043,6 +1056,8 @@ export async function swapMealType(mealPlanId: string, mealType: MealType): Prom
     ? {
         calories: Math.max(0, context.calorieTarget.targetCalories - otherMealsCalories),
         proteinG: Math.max(0, context.calorieTarget.proteinTargetG - otherMealsProtein),
+        carbsG: Math.max(0, context.calorieTarget.carbTargetG - otherMealsCarbs),
+        fatG: Math.max(0, context.calorieTarget.fatTargetG - otherMealsFat),
       }
     : null;
 

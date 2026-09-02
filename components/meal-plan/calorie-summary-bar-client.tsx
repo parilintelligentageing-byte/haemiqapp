@@ -2,20 +2,9 @@
 
 import { useState } from "react";
 import type { CalorieTargetResult } from "@/lib/nutrition/calorie-targets";
-import type { MicronutrientTotals } from "@/lib/nutrition/micronutrients";
+import type { MicronutrientGap } from "@/lib/nutrition/micronutrient-targets";
 
 type MacroTotals = { calories: number; protein: number; carbs: number; fat: number };
-
-const MICRONUTRIENT_ROWS: Array<{ key: keyof MicronutrientTotals; label: string; unit: string }> = [
-  { key: "ironMg", label: "Iron", unit: "mg" },
-  { key: "vitaminB12Mcg", label: "Vitamin B12", unit: "mcg" },
-  { key: "folateMcg", label: "Folate", unit: "mcg" },
-  { key: "vitaminDMcg", label: "Vitamin D", unit: "mcg" },
-  { key: "calciumMg", label: "Calcium", unit: "mg" },
-  { key: "potassiumMg", label: "Potassium", unit: "mg" },
-  { key: "sodiumMg", label: "Sodium", unit: "mg" },
-  { key: "fiberG", label: "Fiber", unit: "g" },
-];
 
 function ToggleButton({
   label,
@@ -43,11 +32,11 @@ function ToggleButton({
 export function CalorieSummaryBarClient({
   target,
   totals,
-  micronutrients,
+  microGaps,
 }: {
   target: CalorieTargetResult | null;
   totals: MacroTotals;
-  micronutrients: MicronutrientTotals;
+  microGaps: MicronutrientGap[];
 }) {
   const [expanded, setExpanded] = useState<"macros" | "micros" | null>(null);
 
@@ -139,16 +128,39 @@ export function CalorieSummaryBarClient({
         )}
 
         {expanded === "micros" && (
-          <div className="grid grid-cols-2 gap-4 border-t border-line pt-6 sm:grid-cols-4">
-            {MICRONUTRIENT_ROWS.map((row) => (
-              <div key={row.key} className="text-center">
-                <p className="font-serif text-lg text-ink italic">
-                  {Math.round(micronutrients[row.key])}
-                  {row.unit}
-                </p>
-                <p className="mt-1 font-sans text-[10px] tracking-wide text-text-soft uppercase">{row.label}</p>
-              </div>
-            ))}
+          <div className="border-t border-line pt-6">
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              {microGaps.map((gap) => (
+                <div key={gap.key} className="text-center">
+                  <p
+                    className="font-serif text-lg italic"
+                    style={{ color: gap.withinTolerance ? "var(--color-ink)" : "var(--color-alert)" }}
+                  >
+                    {Math.round(gap.actual)}
+                    <span className="text-sm text-text-soft">
+                      {" "}
+                      / {Math.round(gap.target)}
+                      {gap.unit}
+                    </span>
+                  </p>
+                  <p className="mt-1 font-sans text-[10px] tracking-wide text-text-soft uppercase">
+                    {gap.label}
+                    {gap.isCeiling ? " limit" : ""}
+                  </p>
+                </div>
+              ))}
+            </div>
+            {microGaps.some((gap) => !gap.withinTolerance && gap.note) && (
+              <ul className="mt-5 space-y-1.5">
+                {microGaps
+                  .filter((gap) => !gap.withinTolerance && gap.note)
+                  .map((gap) => (
+                    <li key={gap.key} className="font-sans text-xs text-text-soft">
+                      <span className="text-gold">{gap.label}:</span> {gap.note}
+                    </li>
+                  ))}
+              </ul>
+            )}
           </div>
         )}
       </div>
